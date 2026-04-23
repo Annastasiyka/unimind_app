@@ -724,4 +724,45 @@ body,
     font-size: 16px;
     margin-bottom: 0;
   }
+
+.sidebar {
+    position: fixed;
+    top: 95px; /* Висота навбару */
+    right: 20px;
+    left: auto;
+    width: 220px;
+    height: auto;
+    background: rgba(255, 255, 255, 0.9);
+    backdrop-filter: blur(15px);
+    border-radius: 20px;
+    flex-direction: column;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    transition: all 0.3s ease-in-out;
+    z-index: 1000;
+  }
+
+  .sidebar.closed {
+    transform: translateY(-20px);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .sidebar.open {
+    transform: translateY(0);
+    opacity: 1;
+    pointer-events: all;
+  }
+
+  .sidebar-btn {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 15px 20px;
+    border-bottom: 1px solid rgba(0,0,0,0.05);
+    width: 100%;
+    font-size: 18px;
+  }
+
+  
+
 }

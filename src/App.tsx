@@ -1,20 +1,22 @@
 import { useState, useEffect } from "react";
 import {
-  User,
-  Mail,
-  Lock,
-  KeyRound,
-  Eye,
-  EyeOff,
   Calculator,
-  NotebookPen
+  NotebookPen,
 } from "lucide-react";
 import {
   HeadCircuitIcon,
   CalendarCheckIcon,
-  CaretDownIcon
+  CaretDownIcon,
 } from "@phosphor-icons/react";
 import "./index.css";
+import { SemesterPage } from "./pages/SemesterPage";
+import { ProfilePage } from "./pages/ProfilePage";
+import { CalendarPage } from "./pages/CalendarPage";
+import { CalculatorPage } from "./pages/CalculatorPage";
+import { AIPlanerPage } from "./pages/AIPlanerPage";
+import { StartPage } from "./pages/StartPage";
+import { LoginPage } from "./pages/LoginPage";
+import { SignupPage } from "./pages/SignupPage";
 
 interface ZoomEvent extends Event {
   ctrlKey?: boolean;
@@ -47,6 +49,31 @@ function App() {
   const [isconfirmVisible, setIsConfirmVisible] = useState<boolean>(false);
   const [isShaking, setIsShaking] = useState<boolean>(false);
 
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const renderPageContent = () => {
+    switch (currentScreen) {
+      case "main":
+        return <SemesterPage />;
+      case "calendar":
+        return <CalendarPage />;
+      case "AIplaner":
+        return <AIPlanerPage />;
+      case "Calculator":
+        return <CalculatorPage />;
+      case "profile":
+        return <ProfilePage />;
+      default:
+        return null;
+    }
+  };
 
   const triggerShake = () => {
     setIsShaking(true);
@@ -147,536 +174,92 @@ function App() {
       window.removeEventListener("touchmove", preventZoom);
     };
   }, [currentScreen]);
+// ... (весь код зі станами та функціями handlRegister/handleLogin залишається без змін)
 
-  // Стартова сторінка
-  if (currentScreen === "start") {
-    return (
-      <div className="startPage">
-        <img src="/images/back.png" className="bg-image" alt="Background" />
-        <div className="logoBlock">
-          <div className="logo">
-            <div className="circle"></div>
-            <img src="/images/logo.png" className="logo-img" alt="Logo" />
-          </div>
-        </div>
-        <div className="NameBlock">
-          <h1 className="Name">UniMind</h1>
-        </div>
-        <div className="Auth">
-          <button
-            className="auth-btn2"
-            onClick={(e) => {
-              e.preventDefault();
-              clearInputs();
-              setCurrentScreen("signup");
-            }}
-          >
-            Вхід в систему
-          </button>
-          <button
-            className="auth-btn1"
-            onClick={() => setCurrentScreen("main")}
-          >
-            Продовжити без входу
-          </button>
-        </div>
-      </div>
-    );
-  }
+  return (
+    <>
+      {currentScreen === "start" && (
+        <StartPage setCurrentScreen={setCurrentScreen} clearInputs={clearInputs} />
+      )}
 
-  // Реєстрація
-  if (currentScreen === "signup") {
-    return (
-      <div className="AuthPage">
-        <img src="/images/login.png" className="LoginBack" alt="Background" />
-        <div className="login-container">
-          <div className="name">
-            <img src="/images/logoLogin.png" className="loginlogo" alt="Logo" />
-            <h1 className="loginTitle">UniMind</h1>
-          </div>
-          <div className="form">
-            <h1 className="title"> Створіть свій акаунт </h1>
-            <div className="account">
-              <div className="input-group">
-                <label>Введіть ім'я користувача:</label>
-                <div className="input-wrapper">
-                  <User className="input-icon" size={18} />
-                  <input
-                    type="text"
-                    placeholder="Ім'я"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="input-group">
-                <label>Введіть електронну пошту:</label>
-                <div className="input-wrapper">
-                  <Mail className="input-icon" size={18} />
-                  <input
-                    type="email"
-                    placeholder="Електронна пошта"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="input-group">
-                <label>Введіть пароль:</label>
-                <div className="input-wrapper">
-                  <Lock className="input-icon" size={18} />
-                  <input
-                    type={isVisible ? "text" : "password"}
-                    placeholder="Пароль"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="eye-btn"
-                    onClick={() => setIsVisible(!isVisible)}
-                  >
-                    {isVisible ? <EyeOff size={18} /> : <Eye size={18} />}
+      {currentScreen === "signup" && (
+        <SignupPage 
+          name={name} setName={setName}
+          email={email} setEmail={setEmail}
+          password={password} setPassword={setPassword}
+          confirmPassword={confirmPassword} setConfirmPassword={setConfirmPassword}
+          error={error} isShaking={isShaking}
+          isVisible={isVisible} setIsVisible={setIsVisible}
+          isconfirmVisible={isconfirmVisible} setIsConfirmVisible={setIsConfirmVisible}
+          handlRegister={handlRegister} setCurrentScreen={setCurrentScreen}
+          clearInputs={clearInputs}
+        />
+      )}
+
+      {currentScreen === "login" && (
+        <LoginPage 
+          email={email} setEmail={setEmail}
+          password={password} setPassword={setPassword}
+          error={error} isVisible={isVisible}
+          setIsVisible={setIsVisible} isShaking={isShaking}
+          handleLogin={handleLogin} setCurrentScreen={setCurrentScreen}
+          clearInputs={clearInputs}
+        />
+      )}
+
+      {["main", "calendar", "AIplaner", "Calculator", "profile"].includes(currentScreen) && (
+        <div className={`mainPage ${isMobile ? "mobile" : "desktop"}`}>
+          <div className="navbar">
+            <div className="welcome">
+              <div className="navName">UniMind</div>
+              <div className="prof">
+                <div className="account-icon"></div>
+                <button className="account-btn" onClick={() => setCurrentScreen("profile")}>
+                  <span className="account-name">{name}</span>
+                  <CaretDownIcon size={18} color="#5c4b75" weight="bold" style={{ marginLeft: "5px", top: "4px", position: "relative" }} />
+                </button>
+                {isMobile && (
+                  <button className="menu-toggle" onClick={() => setIsMenuOpen(!isMenuOpen)}>
+                    <NotebookPen size={30} color="#5c4b75" />
                   </button>
-                </div>
+                )}
               </div>
-              <div className="input-group">
-                <label>Введіть пароль ще раз:</label>
-                <div className="input-wrapper">
-                  <KeyRound className="input-icon" size={18} />
-                  <input
-                    type={isconfirmVisible ? "text" : "password"}
-                    placeholder="Підтвердіть пароль"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="eye-btn"
-                    onClick={() => setIsConfirmVisible(!isconfirmVisible)}
-                  >
-                    {isconfirmVisible ? (
-                      <EyeOff size={18} />
-                    ) : (
-                      <Eye size={18} />
-                    )}
-                  </button>
-                </div>
+            </div>
+          </div>
+
+          <div className={`sidebar ${isMobile ? (isMenuOpen ? "open" : "closed") : ""}`}>
+            {!isMobile && (
+              <div className="sidebarLine">
+                <img src="/images/logo.Purple.png" className="sidebar-logo" alt="Logo" />
               </div>
-              <p
-                className={`error ${error ? "visible" : ""} ${isShaking ? "shake-animation2" : ""}`}
-              >
-                {error || " "}
-              </p>
+            )}
+            <button className={`sidebar-btn ${currentScreen === "main" ? "active" : ""}`} onClick={() => { setCurrentScreen("main"); setIsMenuOpen(false); }}>
+              <NotebookPen size={35} color="#5c4b75" strokeWidth={2.1} />
+              {isMobile && <span>Семестр</span>}
+            </button>
+            <button className={`sidebar-btn ${currentScreen === "calendar" ? "active" : ""}`} onClick={() => { setCurrentScreen("calendar"); setIsMenuOpen(false); }}>
+              <CalendarCheckIcon size={35} color="#5c4b75" weight="bold" />
+              {isMobile && <span>Календар</span>}
+            </button>
+            <button className={`sidebar-btn ${currentScreen === "AIplaner" ? "active" : ""}`} onClick={() => { setCurrentScreen("AIplaner"); setIsMenuOpen(false); }}>
+              <HeadCircuitIcon size={35} color="#5c4b75" weight="bold" />
+              {isMobile && <span>AI Планувальник</span>}
+            </button>
+            <button className={`sidebar-btn ${currentScreen === "Calculator" ? "active" : ""}`} onClick={() => { setCurrentScreen("Calculator"); setIsMenuOpen(false); }}>
+              <Calculator size={35} color="#5c4b75" strokeWidth={2.1} />
+              {isMobile && <span>Калькулятор</span>}
+            </button>
+          </div>
 
-              <button
-                className={`register-btn ${isShaking ? "shake-animation" : ""}`}
-                onClick={handlRegister}
-              >
-                Зареєструватися
-              </button>
-              <h2 className="changeAccount">
-                Уже маєте акаунт?{" "}
-                <a
-                  className="move"
-                  href="#"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    clearInputs();
-                    setCurrentScreen("login");
-                  }}
-                >
-                  Увійти
-                </a>
-              </h2>
-            </div>
+          <div className="content">
+            <img src="/images/light.png" className="mainBack" alt="background" />
+            {renderPageContent()}
           </div>
         </div>
-      </div>
-    );
-  }
-
-  // Логін
-  if (currentScreen === "login") {
-    return (
-      <div className="AuthPage">
-        <img src="/images/login.png" className="LoginBack" alt="Background" />
-        <div className="login-container">
-          <div className="name">
-            <img src="/images/logoLogin.png" className="loginlogo" alt="Logo" />
-            <h1 className="loginTitle">UniMind</h1>
-          </div>
-          <div className="form">
-            <h1 className="title"> Увійдіть до свого акаунта </h1>
-            <div className="account" style={{ marginTop: "20px" }}>
-              <div className="input-group">
-                <label>Введіть електронну пошту:</label>
-                <div className="input-wrapper">
-                  <Mail className="input-icon" size={18} />
-                  <input
-                    type="email"
-                    placeholder="Електронна пошта"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="input-group">
-                <label>Введіть пароль:</label>
-                <div className="input-wrapper">
-                  <Lock className="input-icon" size={18} />
-                  <input
-                    type={isVisible ? "text" : "password"}
-                    placeholder="Пароль"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="eye-btn"
-                    onClick={() => setIsVisible(!isVisible)}
-                  >
-                    {isVisible ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
-              </div>
-              <p
-                className={`error ${error ? "visible" : ""} ${isShaking ? "shake-animation2" : ""}`}
-              >
-                {error || " "}
-              </p>
-              <button
-                className={`register-btn ${isShaking ? "shake-animation" : ""}`}
-                style={{ marginTop: "5px" }}
-                onClick={handleLogin}
-              >
-                Увійти
-              </button>
-              <h2 className="changeAccount">
-                Не маєте акаунта?{" "}
-                <a
-                  className="move"
-                  href="#"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    clearInputs();
-                    setCurrentScreen("signup");
-                  }}
-                >
-                  Створити
-                </a>
-              </h2>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Головна
-  if (currentScreen === "main") {
-    return (
-      <div className="mainPage">
-        <div className="navbar">
-          <div className="welcome">
-            <div className=" navName"> UniMind </div>
-            <div className="prof">
-              <div className="account-icon"></div>
-              <button
-                className=" account-btn"
-                onClick={() => setCurrentScreen("profile")}
-              >
-                <span className=" account-name"> {name}</span>
-                <CaretDownIcon
-                  size={18}
-                  color="#5c4b75"
-                  weight="bold"
-                  style={{
-                    marginLeft: "5px",
-                    top: "4px",
-                    position: "relative",
-                  }}
-                />
-              </button>
-            </div>
-          </div>
-        </div>
-        <div className="sidebar">
-          <div className="sidebarLine">
-            <img
-              src="/images/logo.Purple.png"
-              className="sidebar-logo"
-              alt="Logo"
-            />
-          </div>
-          <button
-            className="sidebar-btn"
-            onClick={() => setCurrentScreen("main")}
-          >
-            <NotebookPen size={35} color="#5c4b75" strokeWidth={2.1} />
-          </button>
-          <button
-            className="sidebar-btn"
-            onClick={() => setCurrentScreen("calendar")}
-          >
-            {" "}
-            <CalendarCheckIcon size={35} color="#5c4b75" weight="bold" />
-          </button>
-          <button
-            className="sidebar-btn"
-            onClick={() => setCurrentScreen("AIplaner")}
-          >
-            {" "}
-            <HeadCircuitIcon size={35} color="#5c4b75" weight="bold" />
-          </button>
-          <button
-            className="sidebar-btn"
-            onClick={() => setCurrentScreen("Calculator")}
-          >
-            {" "}
-            <Calculator size={35} color="#5c4b75" strokeWidth={2.1} />
-          </button>
-        </div>
-        <div className="content">
-         <img src ="/images/light.png" className="mainBack"></img>
-        </div>
-      </div>
-    );
-  }
-
-  // Календар
-  if (currentScreen === "calendar") {
-    return (
-      <div className="mainPage">
-        <div className="navbar">
-          <div className="welcome">
-            <div className=" navName"> UniMind </div>
-            <div className="prof">
-              <div className="account-icon"></div>
-              <button className=" account-btn">
-                <span className=" account-name"> {name}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-        <div className="sidebar">
-          <div className="sidebarLine">
-            <img
-              src="/images/logo.Purple.png"
-              className="sidebar-logo"
-              alt="Logo"
-            />
-          </div>
-          <button
-            className="sidebar-btn"
-            onClick={() => setCurrentScreen("main")}
-          >
-            <NotebookPen size={35} color="#5c4b75" strokeWidth={2.1} />
-          </button>
-          <button
-            className="sidebar-btn"
-            onClick={() => setCurrentScreen("calendar")}
-          >
-            {" "}
-            <CalendarCheckIcon size={35} color="#5c4b75" weight="bold" />
-          </button>
-          <button
-            className="sidebar-btn"
-            onClick={() => setCurrentScreen("AIplaner")}
-          >
-            {" "}
-            <HeadCircuitIcon size={35} color="#5c4b75" weight="bold" />
-          </button>
-          <button
-            className="sidebar-btn"
-            onClick={() => setCurrentScreen("Calculator")}
-          >
-            {" "}
-            <Calculator size={35} color="#5c4b75" strokeWidth={2.1} />
-          </button>
-        </div>
-        <div className="content">
-         <img src ="/images/light.png" className="mainBack"></img>
-        </div>
-      </div>
-    );
-  }
-
-  // AIplaner
-  if (currentScreen === "AIplaner") {
-    return (
-      <div className="mainPage">
-        <div className="navbar">
-          <div className="welcome">
-            <div className=" navName"> UniMind </div>
-            <div className="prof">
-              <div className="account-icon"></div>
-              <button className=" account-btn">
-                <span className=" account-name"> {name}!</span>
-              </button>
-            </div>
-          </div>
-        </div>
-        <div className="sidebar">
-          <div className="sidebarLine">
-            <img
-              src="/images/logo.Purple.png"
-              className="sidebar-logo"
-              alt="Logo"
-            />
-          </div>
-          <button
-            className="sidebar-btn"
-            onClick={() => setCurrentScreen("main")}
-          >
-            <NotebookPen size={35} color="#5c4b75" strokeWidth={2.1} />
-          </button>
-          <button
-            className="sidebar-btn"
-            onClick={() => setCurrentScreen("calendar")}
-          >
-            {" "}
-            <CalendarCheckIcon size={35} color="#5c4b75" weight="bold" />
-          </button>
-          <button
-            className="sidebar-btn"
-            onClick={() => setCurrentScreen("AIplaner")}
-          >
-            {" "}
-            <HeadCircuitIcon size={35} color="#5c4b75" weight="bold" />
-          </button>
-          <button
-            className="sidebar-btn"
-            onClick={() => setCurrentScreen("Calculator")}
-          >
-            {" "}
-            <Calculator size={35} color="#5c4b75" strokeWidth={2.1} />
-          </button>
-        </div>
-        <div className="content">
-         <img src ="/images/light.png" className="mainBack"></img>
-        </div>
-      </div>
-    );
-  }
-
-  // Calculator
-  if (currentScreen === "Calculator") {
-    return (
-      <div className="mainPage">
-        <div className="navbar">
-          <div className="welcome">
-            <div className=" navName"> UniMind </div>
-            <div className="prof">
-              <div className="account-icon"></div>
-              <button className=" account-btn">
-                <span className=" account-name"> {name}!</span>
-              </button>
-            </div>
-          </div>
-        </div>
-        <div className="sidebar">
-          <div className="sidebarLine">
-            <img
-              src="/images/logo.Purple.png"
-              className="sidebar-logo"
-              alt="Logo"
-            />
-          </div>
-          <button
-            className="sidebar-btn"
-            onClick={() => setCurrentScreen("main")}
-          >
-            <NotebookPen size={35} color="#5c4b75" strokeWidth={2.1} />
-          </button>
-          <button
-            className="sidebar-btn"
-            onClick={() => setCurrentScreen("calendar")}
-          >
-            {" "}
-            <CalendarCheckIcon size={35} color="#5c4b75" weight="bold" />
-          </button>
-          <button
-            className="sidebar-btn"
-            onClick={() => setCurrentScreen("AIplaner")}
-          >
-            {" "}
-            <HeadCircuitIcon size={35} color="#5c4b75" weight="bold" />
-          </button>
-          <button
-            className="sidebar-btn"
-            onClick={() => setCurrentScreen("Calculator")}
-          >
-            {" "}
-            <Calculator size={35} color="#5c4b75" strokeWidth={2.1} />
-          </button>
-        </div>
-        <div className="content">
-         <img src ="/images/light.png" className="mainBack"></img>
-        </div>
-      </div>
-    );
-  }
-
-  // профіль
-  if (currentScreen === "profile") {
-    return (
-      <div className="mainPage">
-        <div className="navbar">
-          <div className="welcome">
-            <div className=" navName"> UniMind </div>
-            <div className="prof">
-              <div className="account-icon"></div>
-              <button className=" account-btn">
-                <span className=" account-name"> </span>
-              </button>
-            </div>
-          </div>
-        </div>
-        <div className="sidebar">
-          <div className="sidebarLine">
-            <img
-              src="/images/logo.Purple.png"
-              className="sidebar-logo"
-              alt="Logo"
-            />
-          </div>
-          <button
-            className="sidebar-btn"
-            onClick={() => setCurrentScreen("main")}
-          >
-            <NotebookPen size={35} color="#5c4b75" strokeWidth={2.1} />
-          </button>
-          <button
-            className="sidebar-btn"
-            onClick={() => setCurrentScreen("calendar")}
-          >
-            {" "}
-            <CalendarCheckIcon size={35} color="#5c4b75" weight="bold" />
-          </button>
-          <button
-            className="sidebar-btn"
-            onClick={() => setCurrentScreen("AIplaner")}
-          >
-            {" "}
-            <HeadCircuitIcon size={35} color="#5c4b75" weight="bold" />
-          </button>
-          <button
-            className="sidebar-btn"
-            onClick={() => setCurrentScreen("Calculator")}
-          >
-            {" "}
-            <Calculator size={35} color="#5c4b75" strokeWidth={2.1} />
-          </button>
-        </div>
-        <div className="content">
-         <img src ="/images/light.png" className="mainBack"></img>
-        </div>
-      </div>
-    );
-  }
-
-  return null;
+      )}
+    </>
+  );
 }
 
 export default App;
+  
