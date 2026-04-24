@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion"; 
 import {
   Calculator,
   NotebookPen,
@@ -174,42 +175,110 @@ function App() {
       window.removeEventListener("touchmove", preventZoom);
     };
   }, [currentScreen]);
-// ... (весь код зі станами та функціями handlRegister/handleLogin залишається без змін)
 
-  return (
-    <>
+return (
+  <div className="app-container">
+    {/* Головний контейнер анімацій для зміни глобальних екранів */}
+    <AnimatePresence mode="popLayout">
+      
+      {/* 1. СТАРТОВА СТОРІНКА */}
       {currentScreen === "start" && (
-        <StartPage setCurrentScreen={setCurrentScreen} clearInputs={clearInputs} />
+        <motion.div
+          key="start"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.3 }}
+          className="signup-full-wrapper"
+        >
+          <img src="/images/back.png" className="signup-bg-static" alt="" />
+          <StartPage setCurrentScreen={setCurrentScreen} clearInputs={clearInputs} />
+        </motion.div>
       )}
 
-      {currentScreen === "signup" && (
-        <SignupPage 
-          name={name} setName={setName}
-          email={email} setEmail={setEmail}
-          password={password} setPassword={setPassword}
-          confirmPassword={confirmPassword} setConfirmPassword={setConfirmPassword}
-          error={error} isShaking={isShaking}
-          isVisible={isVisible} setIsVisible={setIsVisible}
-          isconfirmVisible={isconfirmVisible} setIsConfirmVisible={setIsConfirmVisible}
-          handlRegister={handlRegister} setCurrentScreen={setCurrentScreen}
-          clearInputs={clearInputs}
-        />
+      {/* 2. БЛОК АВТОРИЗАЦІЇ (Signup / Login зі спільним фоном) */}
+      {["signup", "login"].includes(currentScreen) && (
+        <motion.div
+          key="auth-section"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.3 }}
+          className="signup-full-wrapper"
+        >
+          {/* Ця картинка залишається нерухомою при переході між Login та Signup */}
+          <img src="/images/login.png" className="signup-bg-static" alt="" />
+          
+          <AnimatePresence mode="popLayout">
+            {currentScreen === "signup" && (
+              <motion.div
+                key="signup-form"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 1.05 }}
+                transition={{ duration: 0.3 }}
+                style={{ 
+                  width: "100%", 
+                  display: "flex", 
+                  justifyContent: "center", 
+                  alignItems: "center", 
+                  zIndex: 2 
+                }}
+              >
+                <SignupPage 
+                  name={name} setName={setName}
+                  email={email} setEmail={setEmail}
+                  password={password} setPassword={setPassword}
+                  confirmPassword={confirmPassword} setConfirmPassword={setConfirmPassword}
+                  error={error} isShaking={isShaking}
+                  isVisible={isVisible} setIsVisible={setIsVisible}
+                  isconfirmVisible={isconfirmVisible} setIsConfirmVisible={setIsConfirmVisible}
+                  handlRegister={handlRegister} setCurrentScreen={setCurrentScreen}
+                  clearInputs={clearInputs}
+                />
+              </motion.div>
+            )}
+
+            {currentScreen === "login" && (
+              <motion.div
+                key="login-form"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 1.05 }}
+                transition={{ duration: 0.3 }}
+                style={{ 
+                  width: "100%", 
+                  display: "flex", 
+                  justifyContent: "center", 
+                  alignItems: "center", 
+                  zIndex: 2 
+                }}
+              >
+                <LoginPage 
+                  email={email} setEmail={setEmail}
+                  password={password} setPassword={setPassword}
+                  error={error} isVisible={isVisible}
+                  setIsVisible={setIsVisible} isShaking={isShaking}
+                  handleLogin={handleLogin} setCurrentScreen={setCurrentScreen}
+                  clearInputs={clearInputs}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
       )}
 
-      {currentScreen === "login" && (
-        <LoginPage 
-          email={email} setEmail={setEmail}
-          password={password} setPassword={setPassword}
-          error={error} isVisible={isVisible}
-          setIsVisible={setIsVisible} isShaking={isShaking}
-          handleLogin={handleLogin} setCurrentScreen={setCurrentScreen}
-          clearInputs={clearInputs}
-        />
-      )}
-
+      {/* 3. ГОЛОВНИЙ РОБОЧИЙ ПРОСТІР (Main / Calendar / Planner / etc.) */}
       {["main", "calendar", "AIplaner", "Calculator", "profile"].includes(currentScreen) && (
-        <div className={`mainPage ${isMobile ? "mobile" : "desktop"}`}>
-          <div className="navbar">
+        <motion.div
+          key="main-workspace"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.4 }}
+          className={`mainPage ${isMobile ? "mobile" : "desktop"}`}
+        >
+          <nav className="navbar">
             <div className="welcome">
               <div className="navName">UniMind</div>
               <div className="prof">
@@ -225,9 +294,9 @@ function App() {
                 )}
               </div>
             </div>
-          </div>
+          </nav>
 
-          <div className={`sidebar ${isMobile ? (isMenuOpen ? "open" : "closed") : ""}`}>
+          <aside className={`sidebar ${isMobile ? (isMenuOpen ? "open" : "closed") : ""}`}>
             {!isMobile && (
               <div className="sidebarLine">
                 <img src="/images/logo.Purple.png" className="sidebar-logo" alt="Logo" />
@@ -249,16 +318,19 @@ function App() {
               <Calculator size={35} color="#5c4b75" strokeWidth={2.1} />
               {isMobile && <span>Калькулятор</span>}
             </button>
-          </div>
+          </aside>
 
-          <div className="content">
+          <main className="content">
+            {/* Глобальний фон для робочої зони */}
             <img src="/images/light.png" className="mainBack" alt="background" />
             {renderPageContent()}
-          </div>
-        </div>
+          </main>
+        </motion.div>
       )}
-    </>
-  );
+    </AnimatePresence>
+  </div>
+);
+
 }
 
 export default App;
