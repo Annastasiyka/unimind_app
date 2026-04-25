@@ -1,9 +1,6 @@
 import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion"; 
-import {
-  Calculator,
-  NotebookPen,
-} from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Calculator, NotebookPen, TableOfContents } from "lucide-react";
 import {
   HeadCircuitIcon,
   CalendarCheckIcon,
@@ -176,162 +173,225 @@ function App() {
     };
   }, [currentScreen]);
 
-return (
-  <div className="app-container">
-    {/* Головний контейнер анімацій для зміни глобальних екранів */}
-    <AnimatePresence mode="popLayout">
-      
-      {/* 1. СТАРТОВА СТОРІНКА */}
-      {currentScreen === "start" && (
-        <motion.div
-          key="start"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.3 }}
-          className="signup-full-wrapper"
-        >
-          <img src="/images/back.png" className="signup-bg-static" alt="" />
-          <StartPage setCurrentScreen={setCurrentScreen} clearInputs={clearInputs} />
-        </motion.div>
-      )}
+  return (
+    <div className="app-container">
+      <AnimatePresence mode="popLayout">
+        {/* стартова сторінка  */}
+        {currentScreen === "start" && (
+          <motion.div
+            key="start"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="signup-full-wrapper"
+          >
+            <img src="/images/back.png" className="signup-bg-static" alt="" />
+            <StartPage
+              setCurrentScreen={setCurrentScreen}
+              clearInputs={clearInputs}
+            />
+          </motion.div>
+        )}
 
-      {/* 2. БЛОК АВТОРИЗАЦІЇ (Signup / Login зі спільним фоном) */}
-      {["signup", "login"].includes(currentScreen) && (
-        <motion.div
-          key="auth-section"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.3 }}
-          className="signup-full-wrapper"
-        >
-          {/* Ця картинка залишається нерухомою при переході між Login та Signup */}
-          <img src="/images/login.png" className="signup-bg-static" alt="" />
-          
-          <AnimatePresence mode="popLayout">
-            {currentScreen === "signup" && (
-              <motion.div
-                key="signup-form"
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 1.05 }}
-                transition={{ duration: 0.3 }}
-                style={{ 
-                  width: "100%", 
-                  display: "flex", 
-                  justifyContent: "center", 
-                  alignItems: "center", 
-                  zIndex: 2 
-                }}
-              >
-                <SignupPage 
-                  name={name} setName={setName}
-                  email={email} setEmail={setEmail}
-                  password={password} setPassword={setPassword}
-                  confirmPassword={confirmPassword} setConfirmPassword={setConfirmPassword}
-                  error={error} isShaking={isShaking}
-                  isVisible={isVisible} setIsVisible={setIsVisible}
-                  isconfirmVisible={isconfirmVisible} setIsConfirmVisible={setIsConfirmVisible}
-                  handlRegister={handlRegister} setCurrentScreen={setCurrentScreen}
-                  clearInputs={clearInputs}
-                />
-              </motion.div>
-            )}
+        {/* авторизація */}
+        {["signup", "login"].includes(currentScreen) && (
+          <motion.div
+            key="auth-section"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="signup-full-wrapper"
+          >
+            <img src="/images/login.png" className="signup-bg-static" alt="" />
 
-            {currentScreen === "login" && (
-              <motion.div
-                key="login-form"
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 1.05 }}
-                transition={{ duration: 0.3 }}
-                style={{ 
-                  width: "100%", 
-                  display: "flex", 
-                  justifyContent: "center", 
-                  alignItems: "center", 
-                  zIndex: 2 
-                }}
-              >
-                <LoginPage 
-                  email={email} setEmail={setEmail}
-                  password={password} setPassword={setPassword}
-                  error={error} isVisible={isVisible}
-                  setIsVisible={setIsVisible} isShaking={isShaking}
-                  handleLogin={handleLogin} setCurrentScreen={setCurrentScreen}
-                  clearInputs={clearInputs}
-                />
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </motion.div>
-      )}
+            <AnimatePresence mode="popLayout">
+              {currentScreen === "signup" && (
+                <motion.div
+                  key="signup-form"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 1.05 }}
+                  transition={{ duration: 0.3 }}
+                  style={{
+                    width: "100%",
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    zIndex: 2,
+                  }}
+                >
+                  <SignupPage
+                    name={name}
+                    setName={setName}
+                    email={email}
+                    setEmail={setEmail}
+                    password={password}
+                    setPassword={setPassword}
+                    confirmPassword={confirmPassword}
+                    setConfirmPassword={setConfirmPassword}
+                    error={error}
+                    isShaking={isShaking}
+                    isVisible={isVisible}
+                    setIsVisible={setIsVisible}
+                    isconfirmVisible={isconfirmVisible}
+                    setIsConfirmVisible={setIsConfirmVisible}
+                    handlRegister={handlRegister}
+                    setCurrentScreen={setCurrentScreen}
+                    clearInputs={clearInputs}
+                  />
+                </motion.div>
+              )}
 
-      {/* 3. ГОЛОВНИЙ РОБОЧИЙ ПРОСТІР (Main / Calendar / Planner / etc.) */}
-      {["main", "calendar", "AIplaner", "Calculator", "profile"].includes(currentScreen) && (
-        <motion.div
-          key="main-workspace"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.4 }}
-          className={`mainPage ${isMobile ? "mobile" : "desktop"}`}
-        >
-          <nav className="navbar">
-            <div className="welcome">
-              <div className="navName">UniMind</div>
-              <div className="prof">
-                <div className="account-icon"></div>
-                <button className="account-btn" onClick={() => setCurrentScreen("profile")}>
-                  <span className="account-name">{name}</span>
-                  <CaretDownIcon size={18} color="#5c4b75" weight="bold" style={{ marginLeft: "5px", top: "4px", position: "relative" }} />
-                </button>
-                {isMobile && (
-                  <button className="menu-toggle" onClick={() => setIsMenuOpen(!isMenuOpen)}>
-                    <NotebookPen size={30} color="#5c4b75" />
+              {currentScreen === "login" && (
+                <motion.div
+                  key="login-form"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 1.05 }}
+                  transition={{ duration: 0.3 }}
+                  style={{
+                    width: "100%",
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    zIndex: 2,
+                  }}
+                >
+                  <LoginPage
+                    email={email}
+                    setEmail={setEmail}
+                    password={password}
+                    setPassword={setPassword}
+                    error={error}
+                    isVisible={isVisible}
+                    setIsVisible={setIsVisible}
+                    isShaking={isShaking}
+                    handleLogin={handleLogin}
+                    setCurrentScreen={setCurrentScreen}
+                    clearInputs={clearInputs}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.div>
+        )}
+
+        {/* сам застосунок */}
+        {["main", "calendar", "AIplaner", "Calculator", "profile"].includes(
+          currentScreen,
+        ) && (
+          <motion.div
+            key="main-workspace"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.4 }}
+            className={`mainPage ${isMobile ? "mobile" : "desktop"}`}
+          >
+            <nav className="navbar">
+              <div className="welcome">
+                <div className="leftSide">
+                  {isMobile && (
+                    <button
+                      className="menu-toggle"
+                      onClick={() => setIsMenuOpen(!isMenuOpen)}
+                    >
+                      <TableOfContents size={30} color="#5c4b75" />
+                    </button>
+                  )}
+                  <div className="navName">UniMind</div>
+                </div>
+                <div className="prof">
+                  <div className="account-icon"></div>
+                  <button
+                    className="account-btn"
+                    onClick={() => setCurrentScreen("profile")}
+                  >
+                    <span className="account-name">{name}</span>
+                    <CaretDownIcon
+                      size={18}
+                      color="#5c4b75"
+                      weight="bold"
+                      style={{
+                        marginLeft: "5px",
+                        top: "4px",
+                        position: "relative",
+                      }}
+                    />
                   </button>
-                )}
+                </div>
               </div>
-            </div>
-          </nav>
+            </nav>
 
-          <aside className={`sidebar ${isMobile ? (isMenuOpen ? "open" : "closed") : ""}`}>
-            {!isMobile && (
-              <div className="sidebarLine">
-                <img src="/images/logo.Purple.png" className="sidebar-logo" alt="Logo" />
-              </div>
-            )}
-            <button className={`sidebar-btn ${currentScreen === "main" ? "active" : ""}`} onClick={() => { setCurrentScreen("main"); setIsMenuOpen(false); }}>
-              <NotebookPen size={35} color="#5c4b75" strokeWidth={2.1} />
-              {isMobile && <span>Семестр</span>}
-            </button>
-            <button className={`sidebar-btn ${currentScreen === "calendar" ? "active" : ""}`} onClick={() => { setCurrentScreen("calendar"); setIsMenuOpen(false); }}>
-              <CalendarCheckIcon size={35} color="#5c4b75" weight="bold" />
-              {isMobile && <span>Календар</span>}
-            </button>
-            <button className={`sidebar-btn ${currentScreen === "AIplaner" ? "active" : ""}`} onClick={() => { setCurrentScreen("AIplaner"); setIsMenuOpen(false); }}>
-              <HeadCircuitIcon size={35} color="#5c4b75" weight="bold" />
-              {isMobile && <span>AI Планувальник</span>}
-            </button>
-            <button className={`sidebar-btn ${currentScreen === "Calculator" ? "active" : ""}`} onClick={() => { setCurrentScreen("Calculator"); setIsMenuOpen(false); }}>
-              <Calculator size={35} color="#5c4b75" strokeWidth={2.1} />
-              {isMobile && <span>Калькулятор</span>}
-            </button>
-          </aside>
+            <aside
+              className={`sidebar ${isMobile ? (isMenuOpen ? "open" : "closed") : ""}`}
+            >
+              {!isMobile && (
+                <div className="sidebarLine">
+                  <img
+                    src="/images/logo.Purple.png"
+                    className="sidebar-logo"
+                    alt="Logo"
+                  />
+                </div>
+              )}
+              <button
+                className={`sidebar-btn ${currentScreen === "main" ? "active" : ""}`}
+                onClick={() => {
+                  setCurrentScreen("main");
+                  setIsMenuOpen(false);
+                }}
+              >
+                <NotebookPen size={35} color="#5c4b75" strokeWidth={2.1} />
+                {isMobile && <span>Семестр</span>}
+              </button>
+              <button
+                className={`sidebar-btn ${currentScreen === "calendar" ? "active" : ""}`}
+                onClick={() => {
+                  setCurrentScreen("calendar");
+                  setIsMenuOpen(false);
+                }}
+              >
+                <CalendarCheckIcon size={35} color="#5c4b75" weight="bold" />
+                {isMobile && <span>Календар</span>}
+              </button>
+              <button
+                className={`sidebar-btn ${currentScreen === "AIplaner" ? "active" : ""}`}
+                onClick={() => {
+                  setCurrentScreen("AIplaner");
+                  setIsMenuOpen(false);
+                }}
+              >
+                <HeadCircuitIcon size={35} color="#5c4b75" weight="bold" />
+                {isMobile && <span>AI Планувальник</span>}
+              </button>
+              <button
+                className={`sidebar-btn ${currentScreen === "Calculator" ? "active" : ""}`}
+                onClick={() => {
+                  setCurrentScreen("Calculator");
+                  setIsMenuOpen(false);
+                }}
+              >
+                <Calculator size={35} color="#5c4b75" strokeWidth={2.1} />
+                {isMobile && <span>Калькулятор</span>}
+              </button>
+            </aside>
 
-          <main className="content">
-            {/* Глобальний фон для робочої зони */}
-            <img src="/images/light.png" className="mainBack" alt="background" />
-            {renderPageContent()}
-          </main>
-        </motion.div>
-      )}
-    </AnimatePresence>
-  </div>
-);
-
+            <main className="content">
+              <img
+                src="/images/light.png"
+                className="mainBack"
+                alt="background"
+              />
+              {renderPageContent()}
+            </main>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
 }
 
 export default App;
-  
