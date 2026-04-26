@@ -626,6 +626,28 @@ body,
   z-index: 0;
 }
 
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
+  z-index: 1000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.modal-box {
+  width: min(500px, 90vw);
+  height: auto;
+  padding: 30px;
+  justify-content: space-around;
+}
+
+
 @media (max-width: 768px) {
   .startPage {
     justify-content: center;
@@ -677,7 +699,16 @@ body,
     box-shadow: inset 0 0 60px 40px rgba(255, 255, 255, 0.3);
     border-radius: 20px;
     padding: 20px 15px;
-  }
+    overflow-y: auto;
+    overflow-x: hidden; 
+    scrollbar-width: none;
+  -ms-overflow-style: none; 
+}
+
+.login-container::-webkit-scrollbar {
+  display: none; 
+}
+  
 
   .form {
     display: flex;
@@ -841,83 +872,16 @@ body,
     gap: 5px;
   }
 }
-@media(max-width: 950px)and (orientation: landscape) {
-  .startPage {
-    height: auto; 
-    min-height: 100vh;
-    padding: 20px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center; 
-    align-items: center;
-    overflow-y: auto;
-  }
-
-  .logoBlock {
-    margin-top: 5px;
-    padding-bottom: 5px;
-    width: 100%;
-    display: flex;
-    justify-content: center;
-  }
-
-  .logo {
-    position: relative;
-    width: 230px; 
-    display: flex;
-    justify-content: center;
-    align-items: center;
-  }
-
-  .circle {
-    width: 75%; 
-    height: auto;
-    aspect-ratio: 1 / 1; 
-    max-width: none; 
-    max-height: none;
-    position: absolute;
-    z-index: -1;
-    border-radius: 50%;
-    box-shadow: inset 0 0 40px 20px rgba(177, 224, 239, 0.5);
-    background-color: rgba(105, 102, 102, 0.2);
-  }
-
-  .NameBlock {
-    margin-top: 20px;
-    width: 100%;
-    text-align: center;
-  }
-
-  .Name {
-    margin-bottom: 5px;
-    font-size: clamp(35px, 12vh, 60px); 
-    filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.8));
-  }
-
-  .Auth {
-    display: flex;
-    flex-direction: row; 
-    justify-content: center;
-    gap: 15px;
-    margin-top: 15px;
-    margin-bottom: 10px;
-    width: 100%;
-  }
-
-  .auth-btn1,
-  .auth-btn2 {
-    width: clamp(180px, 25vw, 220px); 
-    height: 48px;  
-    font-size: 18px;
-    border-radius: 12px;
-  }
-
-  .bg-image, .signup-bg-static {
-    height: 100%;
-    width: 100%;
-    position: fixed; 
+@media (max-width: 950px) and (orientation: landscape) {
+  .app-container {
+    position: fixed;
     top: 0;
     left: 0;
-    object-fit: cover;
+    width: 100vh; 
+    height: 100vw;
+    transform: rotate(-90deg);
+    transform-origin: top left;
+    margin-top: 100vh; 
+    overflow: hidden;
   }
 }

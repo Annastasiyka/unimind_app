@@ -1,11 +1,18 @@
 import React from "react";
 
+// 1. Оновлюємо інтерфейс, додаючи handleGuestEntry
 interface StartPageProps {
   setCurrentScreen: (screen: string) => void;
   clearInputs: () => void;
+  handleGuestEntry: () => void; 
 }
 
-export const StartPage: React.FC<StartPageProps> = ({ setCurrentScreen, clearInputs }) => {
+// 2. Деструктуруємо handleGuestEntry з пропсів
+export const StartPage: React.FC<StartPageProps> = ({ 
+  setCurrentScreen, 
+  clearInputs, 
+  handleGuestEntry 
+}) => {
   return (
     <div className="startPage">
       <img src="/images/back.png" className="bg-image" alt="Background" />
@@ -24,12 +31,14 @@ export const StartPage: React.FC<StartPageProps> = ({ setCurrentScreen, clearInp
           onClick={(e) => {
             e.preventDefault();
             clearInputs();
-            setCurrentScreen("signup");
+            setCurrentScreen("login"); // Можна відразу на login, або signup залежно від логіки
           }}
         >
           Вхід в систему
         </button>
-        <button className="auth-btn1" onClick={() => setCurrentScreen("main")}>
+
+        {/* 3. Змінюємо функцію на ту, що ми прописали в App.tsx */}
+        <button className="auth-btn1" onClick={handleGuestEntry}>
           Продовжити без входу
         </button>
       </div>
