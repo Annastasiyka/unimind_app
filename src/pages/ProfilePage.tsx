@@ -13,8 +13,6 @@ const hours = Array.from({ length: 24 }, (_, i) => (i < 10 ? `0${i}:00` : `${i}:
 export const ProfilePage: React.FC<ProfilePageProps> = ({ handleLogout, setCurrentScreen }) => {
   const isGuest = localStorage.getItem("isGuest") === "true";
   const [openPicker, setOpenPicker] = useState<string | null>(null);
-  
-  // Початкові значення, щоб інтерфейс не був порожнім
   const [selectedTime, setSelectedTime] = useState<{ [key: string]: string }>({});
 
   const handleSelect = (day: string, type: string, hour: string) => {
