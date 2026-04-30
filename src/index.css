@@ -5,12 +5,34 @@
   padding: 0;
   box-sizing: border-box;
 }
-html,
-body,
-#root {
-  height: 100dvh; 
+
+html {
+  height: -webkit-fill-available;
+}
+
+body {
+  margin: 0;
+  height: 100dvh;
+  height: -webkit-fill-available;
   width: 100%;
   overflow: hidden;
+}
+:root {
+  --main-bg: hsl(245, 100%, 79%, 0.5);
+  --line-color: rgba(143, 136, 232, 0.7);
+  --line-border: rgba(143, 136, 232, 0.5);
+  --accent-color: #5c4b75;
+  --hover-bg: #9675e37d;
+  --text-glow: rgba(157, 149, 255, 0.4);
+  height: 100dvh;
+  height: -webkit-fill-available;
+  width: 100%;
+  overflow: hidden;
+}
+
+.app-container {
+  min-height: 100dvh;
+  min-height: -webkit-fill-available; /* для Safari */
 }
 
 .startPage {
@@ -27,13 +49,14 @@ body,
 }
 
 .bg-image {
-  position: absolute;
   top: 0;
   left: 0;
   width: 100%;
-  height: 100%;
   object-fit: cover;
   z-index: -1;
+  position: fixed;
+  height: 100dvh;
+  height: -webkit-fill-available;
 }
 
 .logoBlock {
@@ -171,16 +194,17 @@ body,
   align-items: center;
 }
 .LoginBack {
-  position: absolute;
   top: 0;
   left: 0;
   width: 100%;
-  height: 100%;
   object-fit: cover;
   z-index: -1;
   user-select: none;
   -webkit-user-drag: none;
   pointer-events: none;
+  position: fixed;
+  height: 100vh;
+  height: -webkit-fill-available; /* Магія для Safari */
 }
 
 .login-container {
@@ -405,14 +429,7 @@ body,
   animation: shake 0.4s ease-in-out;
 }
 
-:root {
-  --main-bg: hsl(245, 100%, 79%, 0.5);
-  --line-color: rgba(143, 136, 232, 0.7);
-  --line-border: rgba(143, 136, 232, 0.5);
-  --accent-color: #5c4b75;
-  --hover-bg: #9675e37d;
-  --text-glow: rgba(157, 149, 255, 0.4);
-}
+
 
 .sidebar {
   position: fixed;
@@ -452,8 +469,8 @@ body,
   left: 100px;
   width: calc(100% - 100px);
   height: 95px;
-  z-index: 1;
-  height: calc(95px + env(safe-area-inset-top)); 
+  z-index: 1004;
+  height: calc(95px + env(safe-area-inset-top));
   padding-top: env(safe-area-inset-top);
 }
 
@@ -593,6 +610,8 @@ body,
 .mainPage {
   position: relative;
   background: transparent;
+  min-height: 100dvh;
+  min-height: -webkit-fill-available; 
 }
 
 .mainBack {
@@ -600,9 +619,10 @@ body,
   top: 0;
   left: 0;
   width: 100%;
-  height: 100%;
   object-fit: cover;
+  height: -webkit-fill-available;
   z-index: -1;
+  height: 100dvh;
 }
 .signup-full-wrapper {
   position: relative;
@@ -611,16 +631,18 @@ body,
   display: flex;
   justify-content: center;
   align-items: center;
+  min-height: -webkit-fill-available;
 }
 
 .signup-bg-static {
-  position: absolute;
+  object-fit: cover;
+  z-index: -1;
+  position: fixed;
   top: 0;
   left: 0;
   width: 100%;
-  height: 100%;
-  object-fit: cover;
-  z-index: -1;
+  height: 100dvh;
+  height: -webkit-fill-available;
 }
 .content {
   background: transparent;
@@ -628,7 +650,6 @@ body,
   width: calc(100% - 100px);
   overflow-y: auto;
   position: relative;
-  z-index: 0;
   margin-top: calc(95px + env(safe-area-inset-top));
   height: calc(100dvh - (95px + env(safe-area-inset-top)));
   padding-bottom: env(safe-area-inset-bottom);
@@ -637,36 +658,35 @@ body,
 .profile-container {
   display: flex;
   justify-content: center;
-  align-items: flex-start; 
-  min-height: 100%; 
+  align-items: flex-start;
+  min-height: 100%;
   width: 100%;
-  padding: 40px 0; 
+  padding: 40px 0;
 }
 .prof-body {
   width: 70%;
-  height: auto; 
+  height: auto;
   display: flex;
   flex-direction: column;
   gap: 25px;
-  overflow: visible; 
+  overflow: visible;
 }
 .prof-body::-webkit-scrollbar {
   display: none;
 }
 
-
 @media (min-width: 769px) and (max-width: 1100px) {
   .prof-body {
-    width: 85%; 
+    width: 85%;
   }
 
   .day-row {
-    padding: 10px 15px; 
+    padding: 10px 15px;
     gap: 10px;
   }
 
   .day-label {
-    font-size: 16px; 
+    font-size: 16px;
     min-width: 90px;
   }
 
@@ -676,20 +696,20 @@ body,
 
   .time-picker-trigger {
     height: 38px;
-    font-size: 15px; 
+    font-size: 15px;
     gap: 8px;
     border-radius: 12px;
   }
 
   .time-picker-trigger svg {
-    width: 16px !important; 
+    width: 16px !important;
     height: 16px !important;
   }
 
   .time-controls {
-    gap: 8px; 
+    gap: 8px;
   }
-  
+
   .separator {
     font-size: 16px;
   }
@@ -757,15 +777,15 @@ body,
   flex-direction: column;
   padding: 20px 25px;
   width: 100%;
-  height: auto; 
-  min-height: auto; 
-  max-height: none; 
+  height: auto;
+  min-height: auto;
+  max-height: none;
   border-radius: 20px;
   background: rgba(220, 202, 242, 0.208);
   backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.2);
   box-shadow: inset 0 0 30px 10px rgba(249, 246, 246, 0.5);
-  overflow: visible; 
+  overflow: visible;
 }
 
 .profile-text {
@@ -872,7 +892,7 @@ body,
   transition: all 0.3s ease;
   position: relative;
   z-index: 1;
-  gap: 20px; 
+  gap: 20px;
 }
 
 .day-row.active-row {
@@ -886,13 +906,13 @@ body,
   display: flex;
   align-items: center;
   display: flex;
-  flex: 1; 
-  gap: 15px; 
-  width: auto; 
+  flex: 1;
+  gap: 15px;
+  width: auto;
 }
 
 .day-label {
-  min-width: 110px; 
+  min-width: 110px;
   width: 15%;
   font-family: "Bodoni MT", serif;
   font-weight: bold;
@@ -909,17 +929,17 @@ body,
 
 .custom-dropdown-container {
   position: relative;
-  width: clamp(100px, 15vw, 145px); 
-  flex-shrink: 1; 
+  width: clamp(100px, 15vw, 145px);
+  flex-shrink: 1;
 }
 
 .time-picker-trigger {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: clamp(6px, 1vw, 12px); 
+  gap: clamp(6px, 1vw, 12px);
   width: 100%;
-  height: clamp(36px, 4.5dvh, 46px); 
+  height: clamp(36px, 4.5dvh, 46px);
   background: rgba(255, 255, 255, 0.12);
   backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.2);
@@ -927,9 +947,9 @@ body,
   cursor: pointer;
   color: #5c4b75;
   font-family: "Bodoni MT", serif;
-  font-size: clamp(14px, 1.2vw, 18px); 
+  font-size: clamp(14px, 1.2vw, 18px);
   transition: all 0.3s ease;
-  padding: 0 8px; 
+  padding: 0 8px;
 }
 
 .time-picker-trigger svg {
@@ -1973,6 +1993,29 @@ input:checked + .slider:before {
 }
 
 @media (max-width: 768px) {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html {
+    height: -webkit-fill-available;
+  }
+
+  body {
+    background-image: url("your-image.jpg");
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+
+    min-height: 100vh;
+    min-height: -webkit-fill-available;
+
+    margin: 0;
+  }
+
   .startPage {
     justify-content: center;
     height: 100dvh;
@@ -2251,7 +2294,7 @@ input:checked + .slider:before {
   }
 
   .message {
-    font-size: 15px !important; 
+    font-size: 15px !important;
     line-height: 1.3 !important;
     padding: 0 5px;
     margin: 0 !important;
@@ -2280,8 +2323,6 @@ input:checked + .slider:before {
     min-width: 0;
     font-size: 16px;
   }
-
- 
 
   .register-btn {
     width: 100%;
@@ -2351,5 +2392,48 @@ input:checked + .slider:before {
   .separator {
     font-size: 14px;
     opacity: 0.4;
+  }
+}
+
+@supports (-moz-appearance: none) {
+  html,
+  body {
+    -moz-text-size-adjust: none !important;
+  }
+
+  .navName {
+    flex: 1;
+    min-width: 0;
+  }
+
+  @media (max-width: 768px) {
+    .sidebar {
+      width: 220px !important;
+      top: 95px !important;
+    }
+
+    .sidebar-btn {
+      padding: 15px 20px !important;
+      font-size: 18px !important;
+      height: auto !important;
+    }
+
+    .sidebarLine {
+      height: 95px !important;
+    }
+  }
+
+  .calendar-day {
+    min-width: 0 !important;
+  }
+
+  @media (max-width: 768px) {
+    .calendar-body {
+      padding: 5px !important;
+    }
+
+    .calendar-layout main {
+      width: 100% !important;
+    }
   }
 }
