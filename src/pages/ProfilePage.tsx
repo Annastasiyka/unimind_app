@@ -4,7 +4,6 @@ import { faUserGraduate } from "@fortawesome/free-solid-svg-icons";
 import React, { useState, useRef, useEffect } from "react";
 import { Clock, User, Shield, Pencil, ChevronDown, LogOut, Check, Eye, EyeOff, Lock } from "lucide-react";
 
-// --- КОНСТАНТА API ---
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 interface ProfilePageProps {
@@ -95,7 +94,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [isEditingName, setIsEditingName] = useState(false);
 
-  // --- СИНХРОНІЗАЦІЯ ---
   useEffect(() => {
     const loadProfileFromServer = async () => {
       if (!isGuest) {
@@ -121,7 +119,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
     loadProfileFromServer();
   }, [isGuest]);
 
-  // --- ФУНКЦІЇ ЗБЕРЕЖЕННЯ ---
   const saveWorkSchedule = async (newTimes: { [key: string]: string }, newActiveDays: { [key: string]: boolean }) => {
     localStorage.setItem("unimind-work-times", JSON.stringify(newTimes));
     localStorage.setItem("unimind-active-days", JSON.stringify(newActiveDays));
@@ -183,7 +180,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
     } catch { setPasswordMessage("Сервер недоступний"); }
   };
 
-  // --- ОБРОБНИКИ ЯКИХ НЕ ВИСТАЧАЛО ---
   const handlePhotoClick = () => fileInputRef.current?.click();
 
   const handleNameEditClick = () => {

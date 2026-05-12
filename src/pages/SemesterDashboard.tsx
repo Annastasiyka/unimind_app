@@ -22,7 +22,6 @@ import { uk } from "date-fns/locale/uk";
 
 registerLocale("uk", uk);
 
-// --- КОНСТАНТА API ---
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 interface DashboardProps {
@@ -147,26 +146,21 @@ export const SemesterDashboard = ({
   const [newTaskDeadline, setNewTaskDeadline] = useState("");
 
 useEffect(() => {
-  // 1. Оновлюємо локальну копію (localStorage)
   const allSemesters: Semester[] = JSON.parse(localStorage.getItem(storageKey) || "[]");
   const updatedSemesters = allSemesters.map((s) =>
     s.id === semesterId ? { ...s, subjects: subjects } : s
   );
   localStorage.setItem(storageKey, JSON.stringify(updatedSemesters));
 
-  // 2. ФУНКЦІЯ СИНХРОНІЗАЦІЇ З БЕКЕНДОМ
   const syncWithServer = async () => {
     if (!isGuest && userData.id) {
       try {
         const userName = userData.name || "user";
         const plansKey = `unimind-plans-${userName}`;
         const currentPlans = JSON.parse(localStorage.getItem(plansKey) || "[]");
-        
-        // Додаємо графік роботи, щоб уникнути помилки 400
         const workTimes = JSON.parse(localStorage.getItem(`unimind-work-times-${userName}`) || "{}");
         const activeDays = JSON.parse(localStorage.getItem(`unimind-active-days-${userName}`) || "{}");
 
-        // ВИПРАВЛЕНО: Використовуємо API_URL
         await fetch(`${API_URL}/sync/all`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -185,7 +179,6 @@ useEffect(() => {
       }
     }
   };
-  // Дебаунс (затримка), щоб не спамити сервер при кожному натисканні клавіші
   const timeoutId = setTimeout(syncWithServer, 1000);
   return () => clearTimeout(timeoutId);
 }, [subjects, semesterId, storageKey, isGuest, userData.id, userData.name]);
@@ -263,7 +256,6 @@ useEffect(() => {
     setErrorMsg("");
     if (!activeSubject) return;
 
-    // 1. ЛІМІТ КУРСОВИХ (1 на предмет)
     if (newTaskType === "Курсова робота") {
       const existingCW = activeSubject.tasks.find(t => t.type === "Курсова робота");
       if (existingCW && editingTaskId !== existingCW.id) {
@@ -271,7 +263,6 @@ useEffect(() => {
       }
     }
 
-    // 2. ЛІМІТ КРЕДИТІВ (Курсова входить у ліміт 30)
     if (newTaskType === "Курсова робота") {
       const creditsNum = Number(newTaskCredits);
       const oldTaskCredits = editingTaskId 
@@ -283,12 +274,10 @@ useEffect(() => {
       }
     }
 
-    // 3. ЛІМІТ 100 БАЛІВ (Курсова окремо, решта — разом макс 100)
     let finalMaxScore = Number(newTaskMaxScore);
     if (newTaskType === "Курсова робота") {
-      finalMaxScore = 100; // Курсова завжди 100 балів
+      finalMaxScore = 100;
     } else {
-      // Рахуємо суму балів усіх завдань крім курсових та поточного редагованого завдання
       const currentPointsTotal = activeSubject.tasks
         .filter((t) => t.type !== "Курсова робота" && t.id !== editingTaskId)
         .reduce((sum, t) => sum + t.maxScore, 0);

@@ -7,11 +7,8 @@ import {
   GraduationCap
 } from "@phosphor-icons/react";
 
-// --- КОНСТАНТИ ---
-// Цей рядок автоматично підставить адресу з Vercel або localhost
 const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000/api";
 
-// --- ТИПИ ---
 interface Task {
   id: string;
   type: string;
@@ -83,7 +80,6 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
   const [newSemName, setNewSemName] = useState("");
   const [newSemYear, setNewSemYear] = useState("");
 
-  // 1. Ефект збереження та синхронізації
   useEffect(() => {
     localStorage.setItem(storageKey, JSON.stringify(semesters));
 
@@ -93,7 +89,6 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
           const savedPlans = localStorage.getItem(plansKey);
           const currentPlans = savedPlans ? JSON.parse(savedPlans) : [];
 
-          // ВИПРАВЛЕНО: Використовуємо API_URL замість жорсткої адреси
           const response = await fetch(`${API_URL}/sync/all`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -115,13 +110,11 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
     return () => clearTimeout(timeoutId);
   }, [semesters, storageKey, isGuest, userData.id, plansKey]);
 
-  // 2. Ефект завантаження з БД
   useEffect(() => {
     const fetchFromDB = async () => {
       if (isGuest || !userData.id || hasFetched) return;
 
       try {
-        // ВИПРАВЛЕНО: Використовуємо API_URL
         const response = await fetch(`${API_URL}/profile/${userData.id}`);
         const dbUser = await response.json();
         
@@ -139,7 +132,6 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
     fetchFromDB();
   }, [isGuest, userData.id, semesters.length, hasFetched]);
 
-  // --- Решта коду без змін (calculateDefaultData, handleAddSemester тощо) ---
   const calculateDefaultData = () => {
     const nextName = `Семестр ${semesters.length + 1}`;
     if (semesters.length === 0) {

@@ -62,9 +62,6 @@ export const CalendarPage = () => {
 
   const dateKey = selectedDayPlans !== null ? `${selectedDayPlans}-${viewMonth}-${viewYear}` : "";
 
-  // --- ЕФЕКТИ (ПРАВИЛЬНО РОЗДІЛЕНІ) ---
-
-  // 1. Завантаження планів з БД при вході
   useEffect(() => {
     const fetchPlansFromDB = async () => {
       const isGuestMode = localStorage.getItem("isGuest") === "true";
@@ -92,7 +89,6 @@ export const CalendarPage = () => {
     fetchPlansFromDB();
   }, [hasFetched, plans.length]);
 
-  // 2. Збереження в LocalStorage та синхронізація з сервером
   useEffect(() => {
     localStorage.setItem(storageKey, JSON.stringify(plans));
 
@@ -125,7 +121,6 @@ export const CalendarPage = () => {
     return () => clearTimeout(timeoutId);
   }, [plans, storageKey]);
 
-  // 3. Закриття пікера при кліку зовні
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (pickerRef.current && !pickerRef.current.contains(event.target as Node)) {
@@ -137,7 +132,6 @@ export const CalendarPage = () => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isPickerOpen]);
 
-  // --- ЛОГІКА КАЛЕНДАРЯ ---
 
   const getCategoryClass = (type: string) => {
     switch (type) {

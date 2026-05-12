@@ -67,7 +67,6 @@ interface UserData {
 }
 
 function App() {
-  // --- БЕЗПЕЧНА ІНІЦІАЛІЗАЦІЯ СТАНІВ ---
   const [currentScreen, setCurrentScreen] = useState<string>(() => {
     const isLoggedIn = localStorage.getItem("isLoggedIn");
     const isGuest = localStorage.getItem("isGuest");
@@ -115,8 +114,6 @@ function App() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [syncType, setSyncType] = useState<"register" | "login">("register");
-
-  // --- ЕФЕКТИ ---
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth <= 768);
@@ -176,8 +173,6 @@ function App() {
     };
   }, [currentScreen]);
 
-  // --- ЛОГІКА ДАНИХ (БЕКЕНД СИНХРОНІЗАЦІЯ) ---
-
   const populateLocalStorageFromDB = (user: UserData) => {
     if (user.semesters) {
       localStorage.setItem(`unimind-semesters-${user.name}`, JSON.stringify(user.semesters));
@@ -222,7 +217,6 @@ function App() {
       const workTimes = localStorage.getItem(`unimind-work-times-${userName}`);
       const activeDays = localStorage.getItem(`unimind-active-days-${userName}`);
 
-      // ВИПРАВЛЕНО: Використовуємо API_URL
       await fetch(`${API_URL}/sync/all`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -278,8 +272,6 @@ function App() {
     setCurrentScreen("main");
   };
 
-  // --- ФУНКЦІЇ UI ---
-
   const triggerShake = () => {
     setIsShaking(true);
     setTimeout(() => setIsShaking(false), 400);
@@ -318,7 +310,6 @@ function App() {
     return;
   }
   try {
-    // Додано метод POST, щоб сервер міг прийняти тіло запиту (body)
     const response = await fetch(`${API_URL}/auth/signup`, { 
       method: "POST", 
       headers: { "Content-Type": "application/json" },
@@ -332,11 +323,9 @@ function App() {
     const data = await response.json();
 
     if (response.ok) {
-      // Зберігаємо дані користувача в локальне сховище після успішної реєстрації
       localStorage.setItem("userData", JSON.stringify(data.user));
       const guestData = localStorage.getItem("unimind-semesters-guest");
       
-      // Перевіряємо наявність гостьових даних для синхронізації
       if (
         localStorage.getItem("isGuest") === "true" &&
         guestData &&
@@ -348,12 +337,10 @@ function App() {
         finalizeRegistration(false);
       }
     } else {
-      // Виводимо повідомлення про помилку від сервера (наприклад, якщо email вже існує)
       setError(data.message || "Помилка реєстрації");
       triggerShake();
     }
   } catch {
-    // Помилка "Сервер недоступний" виникає, якщо fetch не може встановити з'єднання
     setError("Сервер недоступний");
     triggerShake();
   }
@@ -368,7 +355,6 @@ function App() {
     }
 
     try {
-      // ВИПРАВЛЕНО: Використовуємо API_URL
       const response = await fetch(`${API_URL}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -563,10 +549,10 @@ function App() {
                       gap: "10px",
                     }}
                   >
-                    <div
+                    <div className="profile-icon-name"
                       style={{
-                        width: "45px",
-                        height: "45px",
+                        width: "40px",
+                        height: "40px",
                         borderRadius: "50%",
                         background:
                           localStorage.getItem("isGuest") === "true"
@@ -588,7 +574,6 @@ function App() {
                           localStorage.getItem("isGuest") === "true";
                         const saved = localStorage.getItem("userData");
 
-                        // 1. Гість -> Білий фон + Студент
                         if (isGuestMode) {
                           return (
                             <FontAwesomeIcon
@@ -598,7 +583,6 @@ function App() {
                           );
                         }
 
-                        // 2. Користувач
                         if (saved && saved !== "undefined") {
                           try {
                             const parsed = JSON.parse(saved);
@@ -619,7 +603,6 @@ function App() {
                           }
                         }
 
-                        // 2.2 Немає фото -> Фіолетовий фон + Темна літера (serif)
                         return (
                           <span
                             style={{

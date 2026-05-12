@@ -11,7 +11,6 @@ import {
   FilePlus,
 } from "@phosphor-icons/react";
 
-// --- ТИПИ ---
 interface Task {
   id: string;
   name: string;
@@ -50,8 +49,6 @@ interface Profile {
   bonus: number;
 }
 
-// --- ДОПОМІЖНІ ФУНКЦІЇ ---
-
 const mapSemesterToSimulated = (
   sem: Semester | undefined,
   clearGrades = false,
@@ -66,7 +63,7 @@ const mapSemesterToSimulated = (
     const currentScore = clearGrades
       ? 0
       : standardTasks.reduce((sum, t) => sum + (t.score || 0), 0);
-    
+
     finalItems.push({
       id: s.id,
       name: s.name,
@@ -91,14 +88,17 @@ const mapSemesterToSimulated = (
   return finalItems;
 };
 
-const syncSubjects = (realSubjects: SimulatedSubject[], currentSimulated: SimulatedSubject[]) => {
-  return realSubjects.map(realSub => {
-    const existingSub = currentSimulated.find(s => s.id === realSub.id);
+const syncSubjects = (
+  realSubjects: SimulatedSubject[],
+  currentSimulated: SimulatedSubject[],
+) => {
+  return realSubjects.map((realSub) => {
+    const existingSub = currentSimulated.find((s) => s.id === realSub.id);
     if (existingSub) {
       return {
         ...realSub,
         grade: existingSub.grade,
-        lastValidGrade: existingSub.lastValidGrade
+        lastValidGrade: existingSub.lastValidGrade,
       };
     }
     return realSub;
@@ -109,9 +109,13 @@ export const CalculatorPage = () => {
   const isGuest = localStorage.getItem("isGuest") === "true";
   const userDataString = localStorage.getItem("userData");
   const userData = userDataString ? JSON.parse(userDataString) : {};
-  
-  const storageKey = isGuest ? "unimind-semesters-guest" : `unimind-semesters-${userData.name || "user"}`;
-  const simulationsKey = isGuest ? "unimind-simulations-guest" : `unimind-simulations-${userData.name || "user"}`;
+
+  const storageKey = isGuest
+    ? "unimind-semesters-guest"
+    : `unimind-semesters-${userData.name || "user"}`;
+  const simulationsKey = isGuest
+    ? "unimind-simulations-guest"
+    : `unimind-simulations-${userData.name || "user"}`;
   const lastSemIdKey = `${storageKey}-last-id`;
 
   const [allSemesters] = useState<Semester[]>(() =>
@@ -120,20 +124,28 @@ export const CalculatorPage = () => {
 
   const [selectedSemId, setSelectedSemId] = useState<string>(() => {
     const savedId = localStorage.getItem(lastSemIdKey);
-    if (savedId && allSemesters.some(s => s.id === savedId)) return savedId;
-    return allSemesters.length > 0 ? allSemesters[allSemesters.length - 1].id : "";
+    if (savedId && allSemesters.some((s) => s.id === savedId)) return savedId;
+    return allSemesters.length > 0
+      ? allSemesters[allSemesters.length - 1].id
+      : "";
   });
 
   const [profiles, setProfiles] = useState<Profile[]>(() => {
     const savedSimsRaw = localStorage.getItem(simulationsKey);
     const currentSem = allSemesters.find((s) => s.id === selectedSemId);
-    
+
     if (savedSimsRaw) {
       try {
         const savedProfiles: Profile[] = JSON.parse(savedSimsRaw);
-        return savedProfiles.map(p => {
+        return savedProfiles.map((p) => {
           if (p.id === "me" && currentSem) {
-            return { ...p, subjects: syncSubjects(mapSemesterToSimulated(currentSem), p.subjects) };
+            return {
+              ...p,
+              subjects: syncSubjects(
+                mapSemesterToSimulated(currentSem),
+                p.subjects,
+              ),
+            };
           }
           return p;
         });
@@ -141,7 +153,7 @@ export const CalculatorPage = () => {
         console.error("Error restoration simulation:", e);
       }
     }
-    
+
     return [
       {
         id: "me",
@@ -156,6 +168,16 @@ export const CalculatorPage = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [isSemDropdownOpen, setIsSemDropdownOpen] = useState(false);
 
+  // --- ЛОГІКА ВИЗНАЧЕННЯ МОБІЛКИ ---
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= 768);
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
   useEffect(() => {
     localStorage.setItem(simulationsKey, JSON.stringify(profiles));
   }, [profiles, simulationsKey]);
@@ -166,16 +188,21 @@ export const CalculatorPage = () => {
 
   const handleSemesterChange = (id: string) => {
     setSelectedSemId(id);
-    const newSem = allSemesters.find(s => s.id === id);
+    const newSem = allSemesters.find((s) => s.id === id);
     if (newSem) {
       const newSubjects = mapSemesterToSimulated(newSem);
-      setProfiles(prev => prev.map(p => 
-        p.id === "me" ? { ...p, subjects: syncSubjects(newSubjects, p.subjects) } : p
-      ));
+      setProfiles((prev) =>
+        prev.map((p) =>
+          p.id === "me"
+            ? { ...p, subjects: syncSubjects(newSubjects, p.subjects) }
+            : p,
+        ),
+      );
     }
   };
 
-  const activeProfile = profiles.find((p) => p.id === activeProfileId) || profiles[0];
+  const activeProfile =
+    profiles.find((p) => p.id === activeProfileId) || profiles[0];
   const selectedSemester = allSemesters.find((s) => s.id === selectedSemId);
 
   const currentRating = useMemo(() => {
@@ -183,19 +210,26 @@ export const CalculatorPage = () => {
       (sum, s) => sum + (Number(s.grade) || 0) * s.credits,
       0,
     );
-    const totalCr = activeProfile.subjects.reduce((sum, s) => sum + s.credits, 0);
+    const totalCr = activeProfile.subjects.reduce(
+      (sum, s) => sum + s.credits,
+      0,
+    );
     if (totalCr === 0) return 0;
     return parseFloat(
       (0.95 * (weightedSum / totalCr) + 0.05 * activeProfile.bonus).toFixed(2),
     );
   }, [activeProfile]);
 
-  const totalCredits = activeProfile.subjects.reduce((sum, s) => sum + s.credits, 0);
+  const totalCredits = activeProfile.subjects.reduce(
+    (sum, s) => sum + s.credits,
+    0,
+  );
 
   const handleAddProfile = (mode: "copy" | "fresh") => {
     if (profiles.length >= 4) return;
     const newId = crypto.randomUUID();
-    const newSubjects = mode === "copy" ? mapSemesterToSimulated(selectedSemester, true) : [];
+    const newSubjects =
+      mode === "copy" ? mapSemesterToSimulated(selectedSemester, true) : [];
     setProfiles([
       ...profiles,
       {
@@ -224,9 +258,13 @@ export const CalculatorPage = () => {
       lastValidGrade: 0,
       isCourseWork: false,
     };
-    setProfiles(profiles.map((p) =>
-      p.id === activeProfileId ? { ...p, subjects: [...p.subjects, newSub] } : p,
-    ));
+    setProfiles(
+      profiles.map((p) =>
+        p.id === activeProfileId
+          ? { ...p, subjects: [...p.subjects, newSub] }
+          : p,
+      ),
+    );
   };
 
   const updateSubject = <K extends keyof SimulatedSubject>(
@@ -234,128 +272,389 @@ export const CalculatorPage = () => {
     field: K,
     value: SimulatedSubject[K],
   ) => {
-    setProfiles(profiles.map((p) =>
-      p.id === activeProfileId
-        ? {
-            ...p,
-            subjects: p.subjects.map((s) => s.id === id ? { ...s, [field]: value } : s),
-          }
-        : p,
-    ));
+    setProfiles(
+      profiles.map((p) =>
+        p.id === activeProfileId
+          ? {
+              ...p,
+              subjects: p.subjects.map((s) =>
+                s.id === id ? { ...s, [field]: value } : s,
+              ),
+            }
+          : p,
+      ),
+    );
   };
 
   const deleteSubject = (id: string) => {
-    setProfiles(profiles.map((p) =>
-      p.id === activeProfileId ? { ...p, subjects: p.subjects.filter((s) => s.id !== id) } : p,
-    ));
+    setProfiles(
+      profiles.map((p) =>
+        p.id === activeProfileId
+          ? { ...p, subjects: p.subjects.filter((s) => s.id !== id) }
+          : p,
+      ),
+    );
   };
 
   const handleBlur = (id: string) => {
     const updatedSubjects = activeProfile.subjects.map((s) =>
       s.id === id && s.grade === "" ? { ...s, grade: s.lastValidGrade } : s,
     );
-    setProfiles(profiles.map((p) =>
-      p.id === activeProfileId ? { ...p, subjects: updatedSubjects } : p,
-    ));
+    setProfiles(
+      profiles.map((p) =>
+        p.id === activeProfileId ? { ...p, subjects: updatedSubjects } : p,
+      ),
+    );
   };
 
   if (allSemesters.length === 0) {
     return (
-      <div className="empty-dash-state" style={{ height: "80dvh", display: "flex", flexDirection: "column", gap: "20px", justifyContent: "center", alignItems: "center" }}>
+      <div
+        className="empty-dash-state"
+        style={{
+          height: "80dvh",
+          display: "flex",
+          flexDirection: "column",
+          gap: "20px",
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
         <p>Спочатку додайте дані в основному розділі</p>
       </div>
     );
   }
 
   return (
-    <div className="calc-container">
-      <header className="calc-top-header">
-        <h1>Інструмент для прогнозування рейтингу</h1>
-        <p className="calc-description">
+    <div className={`calc-container ${isMobile ? "mobile-v" : ""}`}>
+      <header className="calc-top-header" >
+        <h1
+          style={
+            isMobile
+              ? {
+                  fontSize: "25px",
+                  lineHeight: "1.2",
+                  marginBottom: "2px",
+                  textAlign: "center",
+                }
+              : {}
+          }
+        >
+          Інструмент для прогнозування рейтингу
+        </h1>
+        <p
+          className="calc-description"
+          style={
+            isMobile
+              ? {
+                  fontSize: "15px",
+                  lineHeight: "1.4",
+                  margin: "0 auto",
+                  textAlign: "center",
+                }
+              : {}
+          }
+        >
           Отримайте свої бали в реальному часі або спрогнозуйте свої чи друга
           бали, змінюючи оцінки та плани.
         </p>
       </header>
 
+      {isMobile && (
+        <div
+          className="mobile-sem-selector"
+          style={{
+            marginBottom: "15px",
+            padding: "0 5px",
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+          }}
+        >
+          
+          <div className="custom-select-container compact" style={{ flex: 1 }}>
+          <button 
+  className="custom-select-trigger" 
+  onClick={() => setIsSemDropdownOpen(!isSemDropdownOpen)}
+  style={
+    isMobile 
+      ? { 
+          width: "100%",            
+          maxWidth: "280px",        
+          margin: "0 auto",         
+          display: "flex",
+          justifyContent: "center", 
+          alignItems: "center",
+          gap: "12px",              
+          padding: "12px 20px",     
+          backgroundColor: "white", 
+          border: "1px solid rgba(0, 0, 0, 0.1)", 
+          boxShadow: "0 4px 12px rgba(0, 0, 0, 0.08)", // Трохи посилили тінь знизу
+          fontSize: "15px",
+          fontWeight: "600",
+          height: "auto",           
+          position: "relative",
+          outline: "none"
+        } 
+      : {}
+  }
+>
+  <span>{selectedSemester?.name}</span>
+  <CaretDown 
+    size={16} 
+    className={isSemDropdownOpen ? "rotate" : ""} 
+    style={isMobile ? { position: "static" } : {}} 
+  />
+</button>
+            <AnimatePresence>
+              {isSemDropdownOpen && (
+                <motion.div
+                  className="custom-select-options downwards"
+                  initial={{ opacity: 0, y: -5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -5 }}
+                >
+                  {allSemesters.map((sem) => (
+                    <div
+                      key={sem.id}
+                      className="custom-option"
+                      onClick={() => {
+                        handleSemesterChange(sem.id);
+                        setIsSemDropdownOpen(false);
+                      }}
+                    >
+                      {sem.name}
+                    </div>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
+      )}
+
       <div className="calc-top-section">
         <div className="calc-controls-row">
-          <div className="calc-tabs-container">
+          <div
+            className="calc-tabs-container"
+            style={
+              isMobile
+                ? {
+                    overflowX: "auto",
+                    whiteSpace: "nowrap",
+                  }
+                : {}
+            }
+          >
             {profiles.map((p) => (
               <div
                 key={p.id}
                 className={`calc-tab-item ${activeProfileId === p.id ? "active" : ""}`}
                 onClick={() => setActiveProfileId(p.id)}
               >
-                <User size={16} weight={activeProfileId === p.id ? "fill" : "bold"} />
+                <User
+                  size={16}
+                  weight={activeProfileId === p.id ? "fill" : "bold"}
+                />
                 <span>{p.name}</span>
                 {p.id !== "me" && (
-                  <X 
-                    size={16} 
-                    weight="bold" 
-                    className="dash-action-icon" 
-                    style={{ marginLeft: '5px' }}
-                    onClick={(e) => removeProfile(p.id, e)} 
+                  <X
+                    size={16}
+                    weight="bold"
+                    className="dash-action-icon"
+                    style={{ marginLeft: "5px" }}
+                    onClick={(e) => removeProfile(p.id, e)}
                   />
                 )}
               </div>
             ))}
             {profiles.length < 4 && (
-              <button className="add-tab-btn" onClick={() => setShowAddModal(true)}>
-                <Plus size={18} weight="bold" /> Додати
+              <button
+                className="add-tab-btn"
+                onClick={() => setShowAddModal(true)}
+                style={isMobile ? { minWidth: "fit-content" } : {}}
+              >
+                <Plus size={18} weight="bold" /> {!isMobile && "Додати"}
               </button>
             )}
           </div>
 
-          <div className="sem-selector-compact">
-            <span className="sem-label">Семестр:</span>
-            <div className="custom-select-container compact">
-              <button className="custom-select-trigger" onClick={() => setIsSemDropdownOpen(!isSemDropdownOpen)}>
-                <span>{selectedSemester?.name}</span>
-                <CaretDown size={14} style={{ position: "relative", top: "2px" }} className={isSemDropdownOpen ? "rotate" : ""} />
-              </button>
-              <AnimatePresence>
-                {isSemDropdownOpen && (
-                  <motion.div className="custom-select-options downwards" initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }}>
-                    {allSemesters.map((sem) => (
-                      <div key={sem.id} className="custom-option" onClick={() => { handleSemesterChange(sem.id); setIsSemDropdownOpen(false); }}>
-                        {sem.name}
-                      </div>
-                    ))}
-                  </motion.div>
-                )}
-              </AnimatePresence>
+          {!isMobile && (
+            <div className="sem-selector-compact">
+              <div className="custom-select-container compact">
+                <button
+                  className="custom-select-trigger"
+                  onClick={() => setIsSemDropdownOpen(!isSemDropdownOpen)}
+                >
+                  <span>{selectedSemester?.name}</span>
+                  <CaretDown
+                    size={14}
+                    style={{ position: "relative", top: "2px" }}
+                    className={isSemDropdownOpen ? "rotate" : ""}
+                  />
+                </button>
+                <AnimatePresence>
+                  {isSemDropdownOpen && (
+                    <motion.div
+                      className="custom-select-options downwards"
+                      initial={{ opacity: 0, y: -5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -5 }}
+                    >
+                      {allSemesters.map((sem) => (
+                        <div
+                          key={sem.id}
+                          className="custom-option"
+                          onClick={() => {
+                            handleSemesterChange(sem.id);
+                            setIsSemDropdownOpen(false);
+                          }}
+                        >
+                          {sem.name}
+                        </div>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
-        <section className="formula-card-refined">
-          <div className="formula-img-wrapper">
-            <img src="https://latex.codecogs.com/svg.image?\small&space;R=0.95\times\left(\frac{\sum(Grade\times&space;Credit)}{\sum&space;Credit}\right)&plus;0.05\times&space;Bonus" alt="formula" />
+        <section
+          className="formula-card-refined"
+          style={isMobile ? { padding: "25px", minHeight: "auto" } : {}}
+        >
+          <div className="formula-img-wrapper" style={isMobile ? {} : {}}>
+            <img
+              src={
+                isMobile
+                  ? "https://latex.codecogs.com/svg.image?\\small&space;R=0.95\\times\\left(\\frac{\\sum(G\\times&space;C)}{\\sum&space;C}\\right)&plus;0.05\\times&space;B"
+                  : "https://latex.codecogs.com/svg.image?\\small&space;R=0.95\\times\\left(\\frac{\\sum(Grade\\times&space;Credit)}{\\sum&space;Credit}\\right)&plus;0.05\\times&space;Bonus"
+              }
+              alt="formula"
+              style={isMobile ? { maxHeight: "45px" } : {}}
+            />
           </div>
-          <div className="formula-legend-refined">
-            <span><b>R</b> — рейтинг</span>
-            <span><b>Grade</b> — бали</span>
-            <span><b>Credit</b> — кредити</span>
-            <span><b>Bonus</b> — дод. бали</span>
+          <div
+            className="formula-legend-refined"
+            style={
+              isMobile
+                ? {
+                    fontSize: "14px",
+                    display: "flex",
+                    flexWrap: "wrap",
+                    fontFamily: "Times New Roman, serif",
+                    justifyContent: "center",
+                    gap: "15px",
+                  }
+                : {}
+            }
+          >
+            {isMobile ? (
+              <>
+                <span>
+                  <b>R</b> - рейтинг
+                </span>
+                <span>
+                  <b>G</b> - бали
+                </span>
+                <span>
+                  <b>C</b> - кредити
+                </span>
+                <span>
+                  <b>B</b> - дод. бали
+                </span>
+              </>
+            ) : (
+              <>
+                <span>
+                  <b>R</b> — рейтинг
+                </span>
+                <span>
+                  <b>Grade</b> — бали
+                </span>
+                <span>
+                  <b>Credit</b> — кредити
+                </span>
+                <span>
+                  <b>Bonus</b> — додаткові бали
+                </span>
+              </>
+            )}
           </div>
         </section>
       </div>
 
-      <div className="calc-main-grid">
-        <div className="rating-display-card">
-          <h3>Прогноз рейтингу</h3>
-          <div className="gauge-wrapper">
+      <div
+        className="calc-main-grid"
+        style={
+          isMobile ? { gap: "15px", height: "auto", paddingTop: "15px" } : {}
+        }
+      >
+        <div
+          className="rating-display-card"
+          style={
+            isMobile
+              ? {
+                  padding: "15px",
+                  margin: "0",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "flex-start",
+                  height: "auto",
+                }
+              : {}
+          }
+        >
+          <h3
+            style={
+              isMobile
+                ? {
+                    margin: "0 0 5px 0",
+                    textAlign: "center",
+                    width: "100%",
+                  }
+                : {}
+            }
+          >
+            Прогноз рейтингу
+          </h3>{" "}
+          <div
+            className="gauge-wrapper"
+            style={
+              isMobile
+                ? {
+                    width: "140px",
+                    height: "140px",
+                    margin: "0 auto",
+                    marginBottom: "10px",
+                  }
+                : {}
+            }
+          >
             <svg viewBox="0 0 100 100" className="gauge">
               <circle className="gauge-bg" cx="50" cy="50" r="45" />
               <motion.circle
-                className="gauge-fill" cx="50" cy="50" r="45"
+                className="gauge-fill"
+                cx="50"
+                cy="50"
+                r="45"
                 initial={{ strokeDasharray: "0 283" }}
-                animate={{ strokeDasharray: `${(currentRating / 100) * 283} 283` }}
+                animate={{
+                  strokeDasharray: `${(currentRating / 100) * 283} 283`,
+                }}
                 transition={{ duration: 0.8 }}
               />
             </svg>
             <div className="gauge-text">
-              <span className="rating-value">{currentRating}</span>
+              <span
+                className="rating-value"
+                style={isMobile ? { fontSize: "35px" } : {}}
+              >
+                {currentRating}
+              </span>
               <span className="rating-max">/ 100</span>
             </div>
           </div>
@@ -371,30 +670,70 @@ export const CalculatorPage = () => {
 
           <div className="subjects-list-scroll">
             {activeProfile.subjects.map((s) => (
-              <div key={s.id} className={`subject-row-input ${s.isCourseWork ? "coursework-row" : ""}`}>
+              <div
+                key={s.id}
+                className={`subject-row-input ${s.isCourseWork ? "coursework-row" : ""}`}
+              >
                 <input
-                  type="text" className="sub-name-input" value={s.name}
+                  type="text"
+                  className="sub-name-input"
+                  value={s.name}
                   onChange={(e) => updateSubject(s.id, "name", e.target.value)}
                   disabled={activeProfileId === "me"}
                 />
-                <div className="input-wrapper-centered">
-                  <input
-                    type="text" className="calc-input-small" value={s.grade}
-                    onChange={(e) => updateSubject(s.id, "grade", e.target.value === "" ? "" : Math.min(100, parseInt(e.target.value) || 0))}
+<div 
+  className="input-wrapper-centered" 
+  style={
+    isMobile 
+      ? { 
+          display: "flex",
+          justifyContent: "center", 
+          alignItems: "center",
+          width: "49px",       
+          height: "35px",      
+          padding: "0",        
+          margin: "0 auto"    
+        } 
+      : {}
+  }
+>                  <input
+                    type="text"
+                    className="calc-input-small"
+                    value={s.grade}
+                    onChange={(e) =>
+                      updateSubject(
+                        s.id,
+                        "grade",
+                        e.target.value === ""
+                          ? ""
+                          : Math.min(100, parseInt(e.target.value) || 0),
+                      )
+                    }
                     onBlur={() => handleBlur(s.id)}
                   />
                 </div>
                 <div className="input-wrapper-centered credits-shift">
                   <input
-                    type="text" className="calc-input-small" value={s.credits}
-                    onChange={(e) => updateSubject(s.id, "credits", parseInt(e.target.value) || 0)}
+                    type="text"
+                    className="calc-input-small"
+                    value={s.credits}
+                    onChange={(e) =>
+                      updateSubject(
+                        s.id,
+                        "credits",
+                        parseInt(e.target.value) || 0,
+                      )
+                    }
                     disabled={activeProfileId === "me"}
                   />
                 </div>
                 {activeProfileId !== "me" && (
                   <Trash
-                    size={18} weight="duotone" className="dash-action-icon"
-                    style={{ justifySelf: "center" }} onClick={() => deleteSubject(s.id)}
+                    size={18}
+                    weight="duotone"
+                    className="dash-action-icon"
+                    style={{ justifySelf: "center" }}
+                    onClick={() => deleteSubject(s.id)}
                   />
                 )}
               </div>
@@ -410,8 +749,21 @@ export const CalculatorPage = () => {
             <span className="subject-name">Додаткові бали</span>
             <div className="bonus-input-group">
               <input
-                type="text" className="calc-input-small" value={activeProfile.bonus}
-                onChange={(e) => setProfiles(profiles.map((p) => p.id === activeProfileId ? { ...p, bonus: Math.min(100, parseInt(e.target.value) || 0) } : p))}
+                type="text"
+                className="calc-input-small"
+                value={activeProfile.bonus}
+                onChange={(e) =>
+                  setProfiles(
+                    profiles.map((p) =>
+                      p.id === activeProfileId
+                        ? {
+                            ...p,
+                            bonus: Math.min(100, parseInt(e.target.value) || 0),
+                          }
+                        : p,
+                    ),
+                  )
+                }
               />
               <span className="rating-max">/ 100</span>
             </div>
@@ -421,17 +773,32 @@ export const CalculatorPage = () => {
 
       <AnimatePresence>
         {showAddModal && (
-          <div className="sem-modal-overlay" onClick={() => setShowAddModal(false)}>
-            <motion.div className="choice-modal-card" onClick={(e) => e.stopPropagation()} initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}>
+          <div
+            className="sem-modal-overlay"
+            onClick={() => setShowAddModal(false)}
+          >
+            <motion.div
+              className="choice-modal-card"
+              onClick={(e) => e.stopPropagation()}
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+            >
               <h3>Новий розрахунок</h3>
               <p>Як ви хочете заповнити нові дані?</p>
               <div className="choice-grid">
-                <button className="choice-btn" onClick={() => handleAddProfile("copy")}>
+                <button
+                  className="choice-btn"
+                  onClick={() => handleAddProfile("copy")}
+                >
                   <Copy size={32} weight="duotone" />
                   <span>Копіювати мої предмети</span>
                   <small>(бали будуть скинуті)</small>
                 </button>
-                <button className="choice-btn" onClick={() => handleAddProfile("fresh")}>
+                <button
+                  className="choice-btn"
+                  onClick={() => handleAddProfile("fresh")}
+                >
                   <FilePlus size={32} weight="duotone" />
                   <span>Почати заново</span>
                   <small>(чистий список)</small>
@@ -442,24 +809,90 @@ export const CalculatorPage = () => {
         )}
       </AnimatePresence>
 
-      <footer className="simulation-footer">
-        <div className="sim-status">
-          <div className="sim-icon">✨</div>
-          <div>
-            <strong>Профіль: {activeProfile.name}</strong>
-            <p>Кредити: {totalCredits} / 30</p>
+      {/* --- ФУТЕР (В ОДИН РЯДОК ДЛЯ МОБІЛКИ) --- */}
+      <footer
+        className="simulation-footer"
+        style={
+          isMobile
+            ? {
+                display: "flex",
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "10px 15px",
+              }
+            : {}
+        }
+      >
+        <div
+          className="sim-status"
+          style={
+            isMobile
+              ? { margin: 0, display: "flex", alignItems: "center", gap: "8px" }
+              : {}
+          }
+        >
+          <div className="sim-icon" style={isMobile ? { margin: 0 } : {}}>
+            ✨
+          </div>
+          <div style={isMobile ? { fontSize: "13px" } : {}}>
+            <strong style={{ whiteSpace: "nowrap" }}>
+              {activeProfile.name}
+            </strong>
+            <p
+              style={
+                isMobile
+                  ? { margin: 0, display: "inline", marginLeft: "5px" }
+                  : {}
+              }
+            >
+              Кредити: {totalCredits} / 30
+            </p>
           </div>
         </div>
 
-        <div className="footer-actions" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '15px' }}>
-          {activeProfileId !== "me" && (
-            <span className="reset-hint" style={{ whiteSpace: 'nowrap' }}>Скидання доступне лише для вашого рейтингу</span>
+        <div
+          className="footer-actions"
+          style={
+            isMobile
+              ? { margin: 0 }
+              : {
+                  display: "flex",
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: "15px",
+                }
+          }
+        >
+          {!isMobile && activeProfileId !== "me" && (
+            <span className="reset-hint" style={{ whiteSpace: "nowrap" }}>
+              Скидання доступне лише для вашого рейтингу
+            </span>
           )}
           <button
-            onClick={() => setProfiles(profiles.map((p) => p.id === activeProfileId ? { ...p, subjects: mapSemesterToSimulated(selectedSemester), bonus: 0 } : p))}
-            className="btn-outline" disabled={activeProfileId !== "me"}
+            onClick={() =>
+              setProfiles(
+                profiles.map((p) =>
+                  p.id === activeProfileId
+                    ? {
+                        ...p,
+                        subjects: mapSemesterToSimulated(selectedSemester),
+                        bonus: 0,
+                      }
+                    : p,
+                ),
+              )
+            }
+            className="btn-outline"
+            disabled={activeProfileId !== "me"}
+            style={
+              isMobile
+                ? { padding: "8px 12px", height: "auto", fontSize: "15px" }
+                : {}
+            }
           >
-            <ArrowCounterClockwise size={18} weight="bold" /> Скинути до реальних
+            <ArrowCounterClockwise size={isMobile ? 14 : 18} weight="bold" />{" "}
+            {isMobile ? "Скинути" : "Скинути до реальних"}
           </button>
         </div>
       </footer>
