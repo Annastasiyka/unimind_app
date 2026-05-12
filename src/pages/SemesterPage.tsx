@@ -7,6 +7,10 @@ import {
   GraduationCap
 } from "@phosphor-icons/react";
 
+// --- КОНСТАНТИ ---
+// Цей рядок автоматично підставить адресу з Vercel або localhost
+const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000/api";
+
 // --- ТИПИ ---
 interface Task {
   id: string;
@@ -79,24 +83,24 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
   const [newSemName, setNewSemName] = useState("");
   const [newSemYear, setNewSemYear] = useState("");
 
-  // 1. Ефект збереження та синхронізації (ВИПРАВЛЕНО: додано плани)
+  // 1. Ефект збереження та синхронізації
   useEffect(() => {
     localStorage.setItem(storageKey, JSON.stringify(semesters));
 
     const syncWithServer = async () => {
       if (!isGuest && userData.id) {
         try {
-          // Отримуємо актуальні плани (календар), щоб не затерти їх порожнім масивом
           const savedPlans = localStorage.getItem(plansKey);
           const currentPlans = savedPlans ? JSON.parse(savedPlans) : [];
 
-          const response = await fetch("http://127.0.0.1:5000/api/sync/all", {
+          // ВИПРАВЛЕНО: Використовуємо API_URL замість жорсткої адреси
+          const response = await fetch(`${API_URL}/sync/all`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               userId: userData.id,
               semesters: semesters,
-              plans: currentPlans // ТЕПЕР ПЛАНИ (КАЛЕНДАР) ТАКОЖ ЗБЕРІГАЮТЬСЯ
+              plans: currentPlans
             }),
           });
           
@@ -111,13 +115,14 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
     return () => clearTimeout(timeoutId);
   }, [semesters, storageKey, isGuest, userData.id, plansKey]);
 
-  // 2. Ефект завантаження з БД (ВИПРАВЛЕНО: додано hasFetched)
+  // 2. Ефект завантаження з БД
   useEffect(() => {
     const fetchFromDB = async () => {
       if (isGuest || !userData.id || hasFetched) return;
 
       try {
-        const response = await fetch(`http://127.0.0.1:5000/api/profile/${userData.id}`);
+        // ВИПРАВЛЕНО: Використовуємо API_URL
+        const response = await fetch(`${API_URL}/profile/${userData.id}`);
         const dbUser = await response.json();
         
         if (response.ok && dbUser.semesters && dbUser.semesters.length > 0) {
@@ -134,26 +139,21 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
     fetchFromDB();
   }, [isGuest, userData.id, semesters.length, hasFetched]);
 
-  // 3. Обчислення даних для нового семестру (ВИПРАВЛЕНО TypeError)
+  // --- Решта коду без змін (calculateDefaultData, handleAddSemester тощо) ---
   const calculateDefaultData = () => {
     const nextName = `Семестр ${semesters.length + 1}`;
-    
     if (semesters.length === 0) {
       const today = new Date();
       const year = today.getFullYear();
       const nextYear = today.getMonth() >= 7 ? `${year}/${year + 1} (Осінній)` : `${year - 1}/${year} (Весняний)`;
       return { nextName, nextYear };
     }
-
     const lastSem = semesters[semesters.length - 1];
-
     if (!lastSem || !lastSem.yearString) {
       return { nextName, nextYear: "2026/2027 (Осінній)" };
     }
-
     const match = lastSem.yearString.match(/(\d{4})\/(\d{4})\s*\((Осінній|Весняний)\)/);
     let nextYear = lastSem.yearString;
-
     if (match) {
       const startYear = parseInt(match[1], 10);
       const endYear = parseInt(match[2], 10);
@@ -161,7 +161,6 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
         ? `${startYear}/${endYear} (Весняний)` 
         : `${startYear + 1}/${endYear + 1} (Осінній)`;
     }
-
     return { nextName, nextYear };
   };
 

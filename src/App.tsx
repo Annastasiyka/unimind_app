@@ -19,7 +19,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { SignupPage } from "./pages/SignupPage";
 import { SemesterDashboard } from "./pages/SemesterDashboard";
 
-// --- ТИПІЗАЦІЯ ДЛЯ БЕЗПЕКИ ТА ESLINT ---
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 interface ZoomEvent extends Event {
   ctrlKey?: boolean;
@@ -75,9 +75,7 @@ function App() {
     return "start";
   });
 
-  const [selectedSemesterId, setSelectedSemesterId] = useState<string | null>(
-    null,
-  );
+  const [selectedSemesterId, setSelectedSemesterId] = useState<string | null>(null);
 
   const [name, setName] = useState<string>(() => {
     const isGuest = localStorage.getItem("isGuest") === "true";
@@ -182,13 +180,11 @@ function App() {
 
   const populateLocalStorageFromDB = (user: UserData) => {
     if (user.semesters) {
-    localStorage.setItem(`unimind-semesters-${user.name}`, JSON.stringify(user.semesters));
-  }
-  if (user.plans) {
-    localStorage.setItem(`unimind-plans-${user.name}`, JSON.stringify(user.plans));
-  }
-    
-   
+      localStorage.setItem(`unimind-semesters-${user.name}`, JSON.stringify(user.semesters));
+    }
+    if (user.plans) {
+      localStorage.setItem(`unimind-plans-${user.name}`, JSON.stringify(user.plans));
+    }
     if (user.workSchedule) {
       if (user.workSchedule.times)
         localStorage.setItem(
@@ -224,11 +220,10 @@ function App() {
       const semesters = localStorage.getItem(`unimind-semesters-${userName}`);
       const plans = localStorage.getItem(`unimind-plans-${userName}`);
       const workTimes = localStorage.getItem(`unimind-work-times-${userName}`);
-      const activeDays = localStorage.getItem(
-        `unimind-active-days-${userName}`,
-      );
+      const activeDays = localStorage.getItem(`unimind-active-days-${userName}`);
 
-      await fetch("http://localhost:5000/api/sync/all", {
+      // ВИПРАВЛЕНО: Використовуємо API_URL
+      await fetch(`${API_URL}/sync/all`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -301,104 +296,110 @@ function App() {
     setCurrentScreen("main");
   };
 
-const handleLogout = () => {
-  localStorage.removeItem("userData");
-  localStorage.removeItem("isLoggedIn");
-  localStorage.removeItem("isGuest");
-
-  setName("");
-  setEmail("");
-  setCurrentScreen("start");
-};
-
-  const handlRegister = async () => {
-    setError("");
-    if (!name || !email || !password || !confirmPassword) {
-      setError("Заповніть всі поля");
-      triggerShake();
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError("Паролі не збігаються");
-      triggerShake();
-      return;
-    }
-    try {
-      const response = await fetch("http://localhost:5000/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), password: password }), // trim() прибере випадкові пробіли
-      });
-      const data = await response.json();
-      if (response.ok) {
-        localStorage.setItem("userData", JSON.stringify(data.user));
-        const guestData = localStorage.getItem("unimind-semesters-guest");
-        if (
-          localStorage.getItem("isGuest") === "true" &&
-          guestData &&
-          JSON.parse(guestData).length > 0
-        ) {
-          setSyncType("register");
-          setShowSyncModal(true);
-        } else {
-          finalizeRegistration(false);
-        }
-      } else {
-        setError(data.message || "Помилка");
-        triggerShake();
-      }
-    } catch {
-      setError("Сервер недоступний");
-      triggerShake();
-    }
+  const handleLogout = () => {
+    localStorage.removeItem("userData");
+    localStorage.removeItem("isLoggedIn");
+    localStorage.removeItem("isGuest");
+    setName("");
+    setEmail("");
+    setCurrentScreen("start");
   };
 
-const handleLogin = async () => {
+  const handlRegister = async () => {
   setError("");
-  if (!email || !password) {
-    setError("Введіть пошту та пароль");
+  if (!name || !email || !password || !confirmPassword) {
+    setError("Заповніть всі поля");
     triggerShake();
     return;
   }
-
+  if (password !== confirmPassword) {
+    setError("Паролі не збігаються");
+    triggerShake();
+    return;
+  }
   try {
-    const response = await fetch("http://localhost:5000/api/auth/login", {
-      method: "POST",
+    // Додано метод POST, щоб сервер міг прийняти тіло запиту (body)
+    const response = await fetch(`${API_URL}/auth/signup`, { 
+      method: "POST", 
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ 
+        name: name.trim(),
+        email: email.trim(), 
+        password: password 
+      }),
     });
 
     const data = await response.json();
 
     if (response.ok) {
-      // 1. Спочатку записуємо все в localStorage
+      // Зберігаємо дані користувача в локальне сховище після успішної реєстрації
       localStorage.setItem("userData", JSON.stringify(data.user));
-      localStorage.setItem("isLoggedIn", "true");
-      
-      // 2. Одразу розкладаємо дані по поличках
-      populateLocalStorageFromDB(data.user);
-      
-      // 3. Оновлюємо ім'я в стейті
-      setName(data.user.name);
-
-      // 4. Перевіряємо гостьові дані для міграції
       const guestData = localStorage.getItem("unimind-semesters-guest");
-      if (localStorage.getItem("isGuest") === "true" && guestData && JSON.parse(guestData).length > 0) {
-        setSyncType("login");
+      
+      // Перевіряємо наявність гостьових даних для синхронізації
+      if (
+        localStorage.getItem("isGuest") === "true" &&
+        guestData &&
+        JSON.parse(guestData).length > 0
+      ) {
+        setSyncType("register");
         setShowSyncModal(true);
       } else {
-        localStorage.removeItem("isGuest");
-        setCurrentScreen("main");
+        finalizeRegistration(false);
       }
     } else {
-      setError(data.message || "Неправильні дані");
+      // Виводимо повідомлення про помилку від сервера (наприклад, якщо email вже існує)
+      setError(data.message || "Помилка реєстрації");
       triggerShake();
     }
   } catch {
-    setError("Помилка з'єднання");
+    // Помилка "Сервер недоступний" виникає, якщо fetch не може встановити з'єднання
+    setError("Сервер недоступний");
     triggerShake();
   }
 };
+
+  const handleLogin = async () => {
+    setError("");
+    if (!email || !password) {
+      setError("Введіть пошту та пароль");
+      triggerShake();
+      return;
+    }
+
+    try {
+      // ВИПРАВЛЕНО: Використовуємо API_URL
+      const response = await fetch(`${API_URL}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        localStorage.setItem("userData", JSON.stringify(data.user));
+        localStorage.setItem("isLoggedIn", "true");
+        populateLocalStorageFromDB(data.user);
+        setName(data.user.name);
+
+        const guestData = localStorage.getItem("unimind-semesters-guest");
+        if (localStorage.getItem("isGuest") === "true" && guestData && JSON.parse(guestData).length > 0) {
+          setSyncType("login");
+          setShowSyncModal(true);
+        } else {
+          localStorage.removeItem("isGuest");
+          setCurrentScreen("main");
+        }
+      } else {
+        setError(data.message || "Неправильні дані");
+        triggerShake();
+      }
+    } catch {
+      setError("Помилка з'єднання");
+      triggerShake();
+    }
+  };
 
   const renderPageContent = () => {
     switch (currentScreen) {

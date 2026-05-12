@@ -22,6 +22,9 @@ import { uk } from "date-fns/locale/uk";
 
 registerLocale("uk", uk);
 
+// --- КОНСТАНТА API ---
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+
 interface DashboardProps {
   semesterId: string | null;
   setCurrentScreen: (screen: string) => void;
@@ -155,17 +158,26 @@ useEffect(() => {
   const syncWithServer = async () => {
     if (!isGuest && userData.id) {
       try {
-        // Отримуємо плани (календар), щоб не затерти їх порожнім масивом
-        const plansKey = `unimind-plans-${userData.name || "user"}`;
+        const userName = userData.name || "user";
+        const plansKey = `unimind-plans-${userName}`;
         const currentPlans = JSON.parse(localStorage.getItem(plansKey) || "[]");
+        
+        // Додаємо графік роботи, щоб уникнути помилки 400
+        const workTimes = JSON.parse(localStorage.getItem(`unimind-work-times-${userName}`) || "{}");
+        const activeDays = JSON.parse(localStorage.getItem(`unimind-active-days-${userName}`) || "{}");
 
-        await fetch("http://127.0.0.1:5000/api/sync/all", {
+        // ВИПРАВЛЕНО: Використовуємо API_URL
+        await fetch(`${API_URL}/sync/all`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             userId: userData.id,
-            semesters: updatedSemesters, // Відправляємо всі семестри з оновленими предметами
-            plans: currentPlans         // Відправляємо плани
+            semesters: updatedSemesters, 
+            plans: currentPlans,
+            workSchedule: {
+              times: workTimes,
+              days: activeDays
+            }
           }),
         });
       } catch (error) {
@@ -173,7 +185,6 @@ useEffect(() => {
       }
     }
   };
-
   // Дебаунс (затримка), щоб не спамити сервер при кожному натисканні клавіші
   const timeoutId = setTimeout(syncWithServer, 1000);
   return () => clearTimeout(timeoutId);

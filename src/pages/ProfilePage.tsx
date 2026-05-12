@@ -1,7 +1,11 @@
+
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faUserGraduate } from "@fortawesome/free-solid-svg-icons";
 import React, { useState, useRef, useEffect } from "react";
 import { Clock, User, Shield, Pencil, ChevronDown, LogOut, Check, Eye, EyeOff, Lock } from "lucide-react";
+
+// --- КОНСТАНТА API ---
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 interface ProfilePageProps {
   handleLogout: () => void;
@@ -12,22 +16,19 @@ const hours = Array.from({ length: 24 }, (_, i) =>
   i < 10 ? `0${i}:00` : `${i}:00`,
 );
 
-// --- ФУНКЦІЯ СТИСКАННЯ ЗОБРАЖЕННЯ ---
 const resizeAvatar = (base64Str: string): Promise<string> => {
   return new Promise((resolve) => {
     const img = new Image();
     img.src = base64Str;
     img.onload = () => {
       const canvas = document.createElement('canvas');
-      const MAX_WIDTH = 200; // Ідеальний розмір для аватара
+      const MAX_WIDTH = 200; 
       const scaleSize = MAX_WIDTH / img.width;
       canvas.width = MAX_WIDTH;
       canvas.height = img.height * scaleSize;
-
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        // Зберігаємо як JPEG з якістю 70%, щоб рядок був коротким
         resolve(canvas.toDataURL('image/jpeg', 0.7)); 
       } else {
         resolve(base64Str);
@@ -43,7 +44,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
   const isGuest = localStorage.getItem("isGuest") === "true";
   const [openPicker, setOpenPicker] = useState<string | null>(null);
 
-  // --- СТАНИ ДЛЯ ГРАФІКА ---
+  // --- СТАНИ ---
   const [selectedTime, setSelectedTime] = useState<{ [key: string]: string }>(() => {
     const saved = localStorage.getItem("unimind-work-times");
     return saved ? JSON.parse(saved) : {};
@@ -58,7 +59,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
     };
   });
 
-  // --- СТАНИ КОРИСТУВАЧА ---
   const [userName, setUserName] = useState(() => {
     const storedData = localStorage.getItem("userData");
     if (storedData) {
@@ -81,7 +81,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
     return null;
   });
 
-  // --- СТАНИ БЕЗПЕКИ ТА UI ---
   const [isSecurityOpen, setIsSecurityOpen] = useState(false);
   const [isWorkHoursOpen, setIsWorkHoursOpen] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
@@ -96,7 +95,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [isEditingName, setIsEditingName] = useState(false);
 
-  // --- СИНХРОНІЗАЦІЯ З СЕРВЕРОМ ---
+  // --- СИНХРОНІЗАЦІЯ ---
   useEffect(() => {
     const loadProfileFromServer = async () => {
       if (!isGuest) {
@@ -104,10 +103,8 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
           const storedData = localStorage.getItem("userData");
           const userId = storedData ? JSON.parse(storedData).id : null;
           if (!userId) return;
-
-          const response = await fetch(`http://localhost:5000/api/profile/${userId}`);
+          const response = await fetch(`${API_URL}/profile/${userId}`);
           const data = await response.json();
-
           if (response.ok) {
             setUserName(data.name);
             setAvatar(data.avatar);
@@ -125,23 +122,18 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
   }, [isGuest]);
 
   // --- ФУНКЦІЇ ЗБЕРЕЖЕННЯ ---
-
-  const saveWorkSchedule = async (
-    newTimes: { [key: string]: string }, 
-    newActiveDays: { [key: string]: boolean }
-  ) => {
+  const saveWorkSchedule = async (newTimes: { [key: string]: string }, newActiveDays: { [key: string]: boolean }) => {
     localStorage.setItem("unimind-work-times", JSON.stringify(newTimes));
     localStorage.setItem("unimind-active-days", JSON.stringify(newActiveDays));
-    
     if (!isGuest) {
       try {
         const userId = JSON.parse(localStorage.getItem("userData") || "{}").id;
-        await fetch("http://localhost:5000/api/profile/update-schedule", {
+        await fetch(`${API_URL}/profile/update-schedule`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ userId, schedule: { times: newTimes, days: newActiveDays } }),
         });
-      } catch (error) { console.error("Помилка збереження графіка:", error); }
+      } catch (error) { console.error("Помилка графіка:", error); }
     }
   };
 
@@ -149,19 +141,18 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
     if (!isGuest) {
       try {
         const userId = JSON.parse(localStorage.getItem("userData") || "{}").id;
-        const response = await fetch("http://localhost:5000/api/profile/update-info", {
+        const response = await fetch(`${API_URL}/profile/update-info`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ userId, name: newName, avatar: newAvatar }),
         });
-
         if (response.ok) {
           const data = await response.json();
           const stored = JSON.parse(localStorage.getItem("userData") || "{}");
           localStorage.setItem("userData", JSON.stringify({ ...stored, name: data.user.name, avatar: data.user.avatar }));
           window.dispatchEvent(new Event("userDataUpdated"));
         }
-      } catch (error) { console.error("Помилка оновлення профілю:", error); }
+      } catch (error) { console.error("Помилка профілю:", error); }
     } else {
       const stored = JSON.parse(localStorage.getItem("userData") || "{}");
       localStorage.setItem("userData", JSON.stringify({ ...stored, name: newName, avatar: newAvatar }));
@@ -169,11 +160,31 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
     }
   };
 
-  // --- ОБРОБНИКИ ПОДІЙ ---
-
-  const handlePhotoClick = () => {
-    fileInputRef.current?.click();
+  const handlePasswordChange = async () => {
+    setPasswordMessage("");
+    if (!currentPassword || !newPassword || !confirmNewPassword) {
+      setPasswordMessage("Заповніть усі поля."); return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setPasswordMessage("Нові паролі не співпадають."); return;
+    }
+    try {
+      const userId = JSON.parse(localStorage.getItem("userData") || "{}").id;
+      const response = await fetch(`${API_URL}/profile/update-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, currentPassword, newPassword }),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setPasswordMessage("Пароль успішно змінено!");
+        setCurrentPassword(""); setNewPassword(""); setConfirmNewPassword("");
+      } else { setPasswordMessage(data.message || "Помилка пароля"); }
+    } catch { setPasswordMessage("Сервер недоступний"); }
   };
+
+  // --- ОБРОБНИКИ ЯКИХ НЕ ВИСТАЧАЛО ---
+  const handlePhotoClick = () => fileInputRef.current?.click();
 
   const handleNameEditClick = () => {
     setIsEditingName(true);
@@ -185,31 +196,18 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
     saveUserData(userName, avatar);
   };
 
-  const handlePasswordChange = async () => {
-    setPasswordMessage("");
-    if (!currentPassword || !newPassword || !confirmNewPassword) {
-      setPasswordMessage("Заповніть усі поля."); return;
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const originalBase64 = reader.result as string;
+        const resizedBase64 = await resizeAvatar(originalBase64);
+        setAvatar(resizedBase64);
+        saveUserData(userName, resizedBase64); 
+      };
+      reader.readAsDataURL(file);
     }
-    if (newPassword !== confirmNewPassword) {
-      setPasswordMessage("Нові паролі не співпадають."); return;
-    }
-
-    try {
-      const userId = JSON.parse(localStorage.getItem("userData") || "{}").id;
-      const response = await fetch("http://localhost:5000/api/profile/update-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, currentPassword, newPassword }),
-      });
-
-      const data = await response.json();
-      if (response.ok) {
-        setPasswordMessage("Пароль успішно змінено!");
-        setCurrentPassword(""); setNewPassword(""); setConfirmNewPassword("");
-      } else {
-        setPasswordMessage(data.message || "Помилка зміни пароля");
-      }
-    } catch { setPasswordMessage("Сервер недоступний"); }
   };
 
   const handleToggleDay = (day: string) => {
@@ -225,26 +223,8 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
     saveWorkSchedule(updatedTimes, activeDays);
   };
 
-  // ОНОВЛЕНО: Тепер обробник файлів використовує стискання
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const originalBase64 = reader.result as string;
-        
-      
-        const resizedBase64 = await resizeAvatar(originalBase64);
-        
-        setAvatar(resizedBase64);
-        saveUserData(userName, resizedBase64); 
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
   const days = ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця", "Субота", "Неділя"];
-  
+
   return (
     <div className="profile-container">
       <input 
