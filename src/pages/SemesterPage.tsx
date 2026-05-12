@@ -7,13 +7,18 @@ import {
   GraduationCap
 } from "@phosphor-icons/react";
 
+// --- ТИПИ ---
 interface Task {
   id: string;
+  type: string;
   score: number | null;
+  credits?: number;
 }
 
 interface Subject {
   id: string;
+  name: string;
+  credits: number;
   tasks: Task[];
 }
 
@@ -51,38 +56,112 @@ const semesterIcons = [
 export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: SemesterPageProps) => {
   const isGuest = localStorage.getItem("isGuest") === "true";
   const userDataString = localStorage.getItem("userData");
-  const userData = userDataString ? JSON.parse(userDataString) : {};
+  
+  const userData = userDataString && userDataString !== "undefined" ? JSON.parse(userDataString) : {};
   const storageKey = isGuest ? "unimind-semesters-guest" : `unimind-semesters-${userData.name || "user"}`;
+  const plansKey = isGuest ? "unimind-plans-guest" : `unimind-plans-${userData.name || "user"}`;
 
   const [semesters, setSemesters] = useState<Semester[]>(() => {
     const saved = localStorage.getItem(storageKey);
-    return saved ? JSON.parse(saved) : [];
+    if (saved && saved !== "undefined") {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error("Помилка парсингу семестрів:", e);
+        return [];
+      }
+    }
+    return [];
   });
 
+  const [hasFetched, setHasFetched] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newSemName, setNewSemName] = useState("");
   const [newSemYear, setNewSemYear] = useState("");
 
+  // 1. Ефект збереження та синхронізації (ВИПРАВЛЕНО: додано плани)
   useEffect(() => {
     localStorage.setItem(storageKey, JSON.stringify(semesters));
-  }, [semesters, storageKey]);
 
+    const syncWithServer = async () => {
+      if (!isGuest && userData.id) {
+        try {
+          // Отримуємо актуальні плани (календар), щоб не затерти їх порожнім масивом
+          const savedPlans = localStorage.getItem(plansKey);
+          const currentPlans = savedPlans ? JSON.parse(savedPlans) : [];
+
+          const response = await fetch("http://127.0.0.1:5000/api/sync/all", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              userId: userData.id,
+              semesters: semesters,
+              plans: currentPlans // ТЕПЕР ПЛАНИ (КАЛЕНДАР) ТАКОЖ ЗБЕРІГАЮТЬСЯ
+            }),
+          });
+          
+          if (!response.ok) throw new Error("Server error");
+        } catch (error) {
+          console.error("Фонова синхронізація не вдалася:", error);
+        }
+      }
+    };
+
+    const timeoutId = setTimeout(syncWithServer, 1000);
+    return () => clearTimeout(timeoutId);
+  }, [semesters, storageKey, isGuest, userData.id, plansKey]);
+
+  // 2. Ефект завантаження з БД (ВИПРАВЛЕНО: додано hasFetched)
+  useEffect(() => {
+    const fetchFromDB = async () => {
+      if (isGuest || !userData.id || hasFetched) return;
+
+      try {
+        const response = await fetch(`http://127.0.0.1:5000/api/profile/${userData.id}`);
+        const dbUser = await response.json();
+        
+        if (response.ok && dbUser.semesters && dbUser.semesters.length > 0) {
+          if (semesters.length === 0) {
+            setSemesters(dbUser.semesters);
+          }
+        }
+        setHasFetched(true); 
+      } catch {
+        console.error("Не вдалося підтягнути дані з бази");
+        setHasFetched(true);
+      }
+    };
+    fetchFromDB();
+  }, [isGuest, userData.id, semesters.length, hasFetched]);
+
+  // 3. Обчислення даних для нового семестру (ВИПРАВЛЕНО TypeError)
   const calculateDefaultData = () => {
     const nextName = `Семестр ${semesters.length + 1}`;
+    
     if (semesters.length === 0) {
       const today = new Date();
       const year = today.getFullYear();
       const nextYear = today.getMonth() >= 7 ? `${year}/${year + 1} (Осінній)` : `${year - 1}/${year} (Весняний)`;
       return { nextName, nextYear };
     }
+
     const lastSem = semesters[semesters.length - 1];
+
+    if (!lastSem || !lastSem.yearString) {
+      return { nextName, nextYear: "2026/2027 (Осінній)" };
+    }
+
     const match = lastSem.yearString.match(/(\d{4})\/(\d{4})\s*\((Осінній|Весняний)\)/);
     let nextYear = lastSem.yearString;
+
     if (match) {
       const startYear = parseInt(match[1], 10);
       const endYear = parseInt(match[2], 10);
-      nextYear = lastSem.yearString.includes("Осінній") ? `${startYear}/${endYear} (Весняний)` : `${startYear + 1}/${endYear + 1} (Осінній)`;
+      nextYear = lastSem.yearString.includes("Осінній") 
+        ? `${startYear}/${endYear} (Весняний)` 
+        : `${startYear + 1}/${endYear + 1} (Осінній)`;
     }
+
     return { nextName, nextYear };
   };
 
@@ -115,9 +194,26 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
              const subjects = sem.subjects || [];
              const allTasks = subjects.flatMap(s => s.tasks || []);
              const tasksCompleted = allTasks.filter(t => t.score !== null).length;
-             const gradedTasks = allTasks.filter(t => t.score !== null);
-             const averageGrade = gradedTasks.length > 0 ? gradedTasks.reduce((acc, t) => acc + (t.score || 0), 0) / gradedTasks.length : null;
              const progress = allTasks.length > 0 ? (tasksCompleted / allTasks.length) * 100 : 0;
+
+             let weightedSum = 0;
+             let courseWorkCount = 0;
+
+             subjects.forEach(s => {
+               const standardTasks = s.tasks.filter(t => t.type !== "Курсова робота");
+               const subjectScore = standardTasks.reduce((sum, t) => sum + (t.score || 0), 0);
+               weightedSum += subjectScore * (s.credits || 0);
+
+               const subjectCWs = s.tasks.filter(t => t.type === "Курсова робота");
+               courseWorkCount += subjectCWs.length;
+               
+               subjectCWs.forEach(cw => {
+                 weightedSum += (cw.score || 0) * (cw.credits || 0);
+               });
+             });
+
+             const semesterRating = parseFloat((weightedSum / 30).toFixed(2));
+             const totalItemsCount = subjects.length + courseWorkCount;
 
              return (
               <motion.div 
@@ -137,12 +233,12 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
                 </div>
                 <div className="sem-stats">
                   <div className="sem-stat-row">
-                    <span className="sem-stat-label"><GraduationCap size={18} /> Середній бал</span>
-                    <span className="sem-stat-value">{averageGrade !== null ? averageGrade.toFixed(1) : "—"}</span>
+                    <span className="sem-stat-label"><GraduationCap size={18} /> Семестровий рейтинг </span>
+                    <span className="sem-stat-value">{semesterRating > 0 ? semesterRating : "—"}</span>
                   </div>
                   <div className="sem-stat-row">
-                    <span className="sem-stat-label"><Books size={18} /> Всього предметів</span>
-                    <span className="sem-stat-value">{subjects.length}</span> 
+                    <span className="sem-stat-label"><Books size={18} /> Кількість предметів</span>
+                    <span className="sem-stat-value">{totalItemsCount}</span> 
                   </div>
                 </div>
                 <div className="sem-progress-section">
@@ -152,7 +248,7 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
               </motion.div>
             );
           })}
-          <motion.div className="add-semester-card" onClick={handleOpenModal} layout transition={{ delay: semesters.length * 0.1 }}>
+          <motion.div className="add-semester-card" onClick={handleOpenModal} layout>
             <div className="add-sem-btn"><Plus size={28} weight="bold" /></div>
             <span className="add-sem-text">Додати новий семестр</span>
           </motion.div>
@@ -167,11 +263,11 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
               <div className="sem-modal-form">
                 <div className="sem-input-group">
                   <label>Назва семестру</label>
-                  <input type="text" value={newSemName} onChange={(e) => setNewSemName(e.target.value)} placeholder="Напр: Семестр 1" />
+                  <input type="text" value={newSemName} onChange={(e) => setNewSemName(e.target.value)} />
                 </div>
                 <div className="sem-input-group">
                   <label>Навчальний рік</label>
-                  <input type="text" value={newSemYear} onChange={(e) => setNewSemYear(e.target.value)} placeholder="Напр: 2026/2027 (Осінній)" />
+                  <input type="text" value={newSemYear} onChange={(e) => setNewSemYear(e.target.value)} />
                 </div>
               </div>
               <div className="sem-modal-actions">

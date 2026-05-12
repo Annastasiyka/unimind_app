@@ -13,16 +13,14 @@ export const CalendarPage = () => {
   const [isLoggedIn] = useState(() => {
     const isGuest = localStorage.getItem("isGuest") === "true";
     const userData = localStorage.getItem("userData");
-   
     return !isGuest && !!userData;
   });
 
   const storageKey = (() => {
-    if (!isLoggedIn) return "unimind-plans-guest"; 
-    
+    if (!isLoggedIn) return "unimind-plans-guest";
     const userData = JSON.parse(localStorage.getItem("userData") || "{}");
     const name = userData.name || "user";
-    return `unimind-plans-${name}`; 
+    return `unimind-plans-${name}`;
   })();
 
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -55,15 +53,91 @@ export const CalendarPage = () => {
   const [isAddingPlan, setIsAddingPlan] = useState(false);
   const [planType, setPlanType] = useState("Особисте");
   const [planTime, setPlanTime] = useState("");
-
+  const [hasFetched, setHasFetched] = useState(false);
+  
   const [editingPlanId, setEditingPlanId] = useState<number | string | null>(null);
   const [editText, setEditText] = useState("");
   const [editType, setEditType] = useState("Особисте");
   const [editTime, setEditTime] = useState("");
 
-  const dateKey = selectedDayPlans !== null 
-    ? `${selectedDayPlans}-${viewMonth}-${viewYear}` 
-    : "";
+  const dateKey = selectedDayPlans !== null ? `${selectedDayPlans}-${viewMonth}-${viewYear}` : "";
+
+  // --- ЕФЕКТИ (ПРАВИЛЬНО РОЗДІЛЕНІ) ---
+
+  // 1. Завантаження планів з БД при вході
+  useEffect(() => {
+    const fetchPlansFromDB = async () => {
+      const isGuestMode = localStorage.getItem("isGuest") === "true";
+      const userDataString = localStorage.getItem("userData");
+      const userData = userDataString ? JSON.parse(userDataString) : {};
+
+      if (isGuestMode || !userData.id || hasFetched) return;
+
+      try {
+        const response = await fetch(`http://127.0.0.1:5000/api/profile/${userData.id}`);
+        const dbUser = await response.json();
+        
+        if (response.ok && dbUser.plans && dbUser.plans.length > 0) {
+          if (plans.length === 0) {
+            setPlans(dbUser.plans);
+          }
+        }
+        setHasFetched(true);
+      } catch (error) {
+        console.error("Не вдалося підтягнути плани з бази", error);
+        setHasFetched(true);
+      }
+    };
+
+    fetchPlansFromDB();
+  }, [hasFetched, plans.length]);
+
+  // 2. Збереження в LocalStorage та синхронізація з сервером
+  useEffect(() => {
+    localStorage.setItem(storageKey, JSON.stringify(plans));
+
+    const syncWithServer = async () => {
+      const isGuestMode = localStorage.getItem("isGuest") === "true";
+      const userDataString = localStorage.getItem("userData");
+      const userData = userDataString ? JSON.parse(userDataString) : {};
+
+      if (!isGuestMode && userData.id) {
+        try {
+          const semestersKey = `unimind-semesters-${userData.name || "user"}`;
+          const currentSemesters = JSON.parse(localStorage.getItem(semestersKey) || "[]");
+
+          await fetch("http://127.0.0.1:5000/api/sync/all", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              userId: userData.id,
+              plans: plans,
+              semesters: currentSemesters
+            }),
+          });
+        } catch (error) {
+          console.error("Синхронізація календаря не вдалася:", error);
+        }
+      }
+    };
+
+    const timeoutId = setTimeout(syncWithServer, 1000);
+    return () => clearTimeout(timeoutId);
+  }, [plans, storageKey]);
+
+  // 3. Закриття пікера при кліку зовні
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(event.target as Node)) {
+        setIsPickerOpen(false);
+        setPickerStep("year");
+      }
+    };
+    if (isPickerOpen) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isPickerOpen]);
+
+  // --- ЛОГІКА КАЛЕНДАРЯ ---
 
   const getCategoryClass = (type: string) => {
     switch (type) {
@@ -108,8 +182,8 @@ export const CalendarPage = () => {
   const saveEdit = (id: number | string) => {
     setPlans(
       plans.map((p) =>
-        p.id === id ? { ...p, text: editText, type: editType, time: editTime } : p
-      )
+        p.id === id ? { ...p, text: editText, type: editType, time: editTime } : p,
+      ),
     );
     setEditingPlanId(null);
   };
@@ -120,33 +194,18 @@ export const CalendarPage = () => {
   const deletePlan = (id: number | string) =>
     setPlans(plans.filter((p) => p.id !== id));
 
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (pickerRef.current && !pickerRef.current.contains(event.target as Node)) {
-        setIsPickerOpen(false);
-        setPickerStep("year");
-      }
-    };
-    if (isPickerOpen) document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isPickerOpen]);
-
-  useEffect(() => {
-    localStorage.setItem(storageKey, JSON.stringify(plans));
-  }, [plans, storageKey]);
-
   const monthLabel = new Intl.DateTimeFormat("uk-UA", { month: "long" }).format(currentDate);
   const allMonths = Array.from({ length: 12 }, (_, i) =>
     new Intl.DateTimeFormat("uk-UA", { month: "long" }).format(new Date(2026, i, 1))
   );
-  
+
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
   let firstDayIndex = new Date(viewYear, viewMonth, 1).getDay() - 1;
   if (firstDayIndex === -1) firstDayIndex = 6;
   const weekDays = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"];
 
   const changeMonth = (offset: number) => setCurrentDate(new Date(viewYear, viewMonth + offset, 1));
-  
+
   const handleYearClick = (year: number) => {
     setTempYear(year);
     setPickerStep("month");
@@ -167,7 +226,9 @@ export const CalendarPage = () => {
     );
   };
 
- return (
+
+
+  return (
     <div className="calendar-page">
       <div className="Calendar-message">
         <p>Твій простір подій</p>
@@ -239,14 +300,22 @@ export const CalendarPage = () => {
                       className="search-icon"
                       onClick={() => handleYearClick(tempYear)}
                     >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
                         <circle cx="11" cy="11" r="8"></circle>
                         <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                       </svg>
                     </span>
                   </div>
                   <div className="year-grid">
-                    {Array.from({ length: 6 }, (_, i) => new Date().getFullYear() + i).map((y) => (
+                    {Array.from(
+                      { length: 6 },
+                      (_, i) => new Date().getFullYear() + i,
+                    ).map((y) => (
                       <div
                         key={y}
                         className={`year-item ${tempYear === y ? "active" : ""}`}
@@ -270,7 +339,10 @@ export const CalendarPage = () => {
                       </div>
                     ))}
                   </div>
-                  <button className="return-to-choose-year-btn" onClick={() => setPickerStep("year")}>
+                  <button
+                    className="return-to-choose-year-btn"
+                    onClick={() => setPickerStep("year")}
+                  >
                     ← Повернутися
                   </button>
                 </div>
@@ -279,9 +351,17 @@ export const CalendarPage = () => {
           )}
 
           {/* Сітка календаря */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "10px" }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(7, 1fr)",
+              gap: "10px",
+            }}
+          >
             {weekDays.map((day) => (
-              <div className="week" key={day}>{day}</div>
+              <div className="week" key={day}>
+                {day}
+              </div>
             ))}
             {Array.from({ length: firstDayIndex }).map((_, i) => (
               <div key={`empty-${i}`} style={{ height: "100px" }}></div>
@@ -303,14 +383,19 @@ export const CalendarPage = () => {
                   {plansForThisDay.length > 0 && (
                     <div className="mini-plans-grid">
                       {plansForThisDay.slice(0, 3).map((plan) => (
-                        <div key={plan.id} className={`mini-plan-item ${getCategoryClass(plan.type)}`}>
+                        <div
+                          key={plan.id}
+                          className={`mini-plan-item ${getCategoryClass(plan.type)}`}
+                        >
                           <span className="mini-plan-text">{plan.text}</span>
                         </div>
                       ))}
                     </div>
                   )}
                   {plansForThisDay.length > 3 && (
-                    <div className="more-plans-count">+ {plansForThisDay.length - 3}</div>
+                    <div className="more-plans-count">
+                      + {plansForThisDay.length - 3}
+                    </div>
                   )}
                 </div>
               );
@@ -321,10 +406,18 @@ export const CalendarPage = () => {
 
       {/* Модальне вікно планів на обраний день */}
       {selectedDayPlans !== null && (
-        <div className="modal-overlay" onClick={() => setSelectedDayPlans(null)}>
-          <div className="card-glass plans-modal-content" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="modal-overlay"
+          onClick={() => setSelectedDayPlans(null)}
+        >
+          <div
+            className="card-glass plans-modal-content"
+            onClick={(e) => e.stopPropagation()}
+          >
             <header className="plans-header">
-              <h3>Плани на {selectedDayPlans} {monthLabel}</h3>
+              <h3>
+                Плани на {selectedDayPlans} {monthLabel}
+              </h3>
               <button
                 className={`add-action-btn ${isAddingPlan ? "active" : ""}`}
                 onClick={() => setIsAddingPlan(!isAddingPlan)}
@@ -334,82 +427,185 @@ export const CalendarPage = () => {
             </header>
 
             <div className="plans-list-container">
-              {dayPlans.length > 0 ? dayPlans.map((plan) => (
-                editingPlanId === plan.id ? (
-                  <div key={plan.id} className="edit-plan-inline-block">
-                    <textarea
-                      className="plans-textarea"
-                      value={editText}
-                      onChange={(e) => setEditText(e.target.value)}
-                      autoFocus
-                    ></textarea>
-                    <div className="plan-controls-grid" style={{ marginTop: "12px", display: "flex", gap: "10px" }}>
-                      {/* Вибір часу */}
-                      <div className="control-group-interactive" onClick={() => setActiveDropdown(activeDropdown === "edit-time" ? null : "edit-time")}>
-                        <label>Час :</label>
-                        <div className="custom-select-trigger">
-                          <span>{editTime || "-- : --"}</span>
-                          <span className={`arrow ${activeDropdown === "edit-time" ? "up" : ""}`}>▾</span>
-                        </div>
-                        {activeDropdown === "edit-time" && (
-                          <div className="time-picker-popup downwards" onClick={(e) => e.stopPropagation()}>
-                            <div className="time-columns-container">
-                              <div className="time-column">
-                                <p className="column-label">Години</p>
-                                {hours.map((h) => (
-                                  <div key={h} className={`time-opt ${editTime.split(":")[0] === h ? "active" : ""}`}
-                                    onClick={() => setEditTime(`${h}:${editTime.split(":")[1] || "00"}`)}>{h}</div>
-                                ))}
-                              </div>
-                              <div className="time-column">
-                                <p className="column-label">Хвилини</p>
-                                {minutes.map((m) => (
-                                  <div key={m} className={`time-opt ${editTime.split(":")[1] === m ? "active" : ""}`}
-                                    onClick={() => setEditTime(`${editTime.split(":")[0] || "12"}:${m}`)}>{m}</div>
-                                ))}
-                              </div>
+              {dayPlans.length > 0
+                ? dayPlans.map((plan) =>
+                    editingPlanId === plan.id ? (
+                      <div key={plan.id} className="edit-plan-inline-block">
+                        <textarea
+                          className="plans-textarea"
+                          value={editText}
+                          onChange={(e) => setEditText(e.target.value)}
+                          autoFocus
+                        ></textarea>
+                        <div
+                          className="plan-controls-grid"
+                          style={{
+                            marginTop: "12px",
+                            display: "flex",
+                            gap: "10px",
+                          }}
+                        >
+                          {/* Вибір часу */}
+                          <div
+                            className="control-group-interactive"
+                            onClick={() =>
+                              setActiveDropdown(
+                                activeDropdown === "edit-time"
+                                  ? null
+                                  : "edit-time",
+                              )
+                            }
+                          >
+                            <label>Час :</label>
+                            <div className="custom-select-trigger">
+                              <span>{editTime || "-- : --"}</span>
+                              <span
+                                className={`arrow ${activeDropdown === "edit-time" ? "up" : ""}`}
+                              >
+                                ▾
+                              </span>
                             </div>
-                            <button className="time-done-btn" onClick={() => setActiveDropdown(null)}>Готово</button>
+                            {activeDropdown === "edit-time" && (
+                              <div
+                                className="time-picker-popup downwards"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <div className="time-columns-container">
+                                  <div className="time-column">
+                                    <p className="column-label">Години</p>
+                                    {hours.map((h) => (
+                                      <div
+                                        key={h}
+                                        className={`time-opt ${editTime.split(":")[0] === h ? "active" : ""}`}
+                                        onClick={() =>
+                                          setEditTime(
+                                            `${h}:${editTime.split(":")[1] || "00"}`,
+                                          )
+                                        }
+                                      >
+                                        {h}
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <div className="time-column">
+                                    <p className="column-label">Хвилини</p>
+                                    {minutes.map((m) => (
+                                      <div
+                                        key={m}
+                                        className={`time-opt ${editTime.split(":")[1] === m ? "active" : ""}`}
+                                        onClick={() =>
+                                          setEditTime(
+                                            `${editTime.split(":")[0] || "12"}:${m}`,
+                                          )
+                                        }
+                                      >
+                                        {m}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                                <button
+                                  className="time-done-btn"
+                                  onClick={() => setActiveDropdown(null)}
+                                >
+                                  Готово
+                                </button>
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                      {/* Вибір категорії */}
-                      <div className="control-group-interactive" onClick={() => setActiveDropdown(activeDropdown === "edit-category" ? null : "edit-category")}>
-                        <label>Тип :</label>
-                        <div className="custom-select-trigger">
-                          <span>{editType}</span>
-                          <span className={`arrow ${activeDropdown === "edit-category" ? "up" : ""}`}>▾</span>
+                          {/* Вибір категорії */}
+                          <div
+                            className="control-group-interactive"
+                            onClick={() =>
+                              setActiveDropdown(
+                                activeDropdown === "edit-category"
+                                  ? null
+                                  : "edit-category",
+                              )
+                            }
+                          >
+                            <label>Тип :</label>
+                            <div className="custom-select-trigger">
+                              <span>{editType}</span>
+                              <span
+                                className={`arrow ${activeDropdown === "edit-category" ? "up" : ""}`}
+                              >
+                                ▾
+                              </span>
+                            </div>
+                            {activeDropdown === "edit-category" && (
+                              <ul
+                                className="custom-dropdown-list downwards"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {categories.map((cat) => (
+                                  <li
+                                    key={cat}
+                                    onClick={() => {
+                                      setEditType(cat);
+                                      setActiveDropdown(null);
+                                    }}
+                                    className={editType === cat ? "active" : ""}
+                                  >
+                                    {cat}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                          <div className="edit-actions">
+                            <button
+                              className="delete-btn-inline"
+                              onClick={() => deletePlan(plan.id)}
+                            >
+                              Видалити
+                            </button>
+                            <button
+                              className="save-plans-btn-refined"
+                              onClick={() => saveEdit(plan.id)}
+                            >
+                              OK
+                            </button>
+                          </div>
                         </div>
-                        {activeDropdown === "edit-category" && (
-                          <ul className="custom-dropdown-list downwards" onClick={(e) => e.stopPropagation()}>
-                            {categories.map((cat) => (
-                              <li key={cat} onClick={() => { setEditType(cat); setActiveDropdown(null); }}
-                                className={editType === cat ? "active" : ""}>{cat}</li>
-                            ))}
-                          </ul>
-                        )}
                       </div>
-                      <div className="edit-actions">
-                        <button className="delete-btn-inline" onClick={() => deletePlan(plan.id)}>Видалити</button>
-                        <button className="save-plans-btn-refined" onClick={() => saveEdit(plan.id)}>OK</button>
+                    ) : (
+                      <div
+                        key={plan.id}
+                        className={`plan-item-row ${getCategoryClass(plan.type)} ${plan.completed ? "is-done" : ""}`}
+                      >
+                        <div
+                          className="custom-checkbox"
+                          onClick={() => togglePlan(plan.id)}
+                        >
+                          {plan.completed && "✓"}
+                        </div>
+                        <div className="plan-display-text">
+                          {plan.time && (
+                            <span className="plan-time-display">
+                              {plan.time}
+                            </span>
+                          )}
+                          <p className="plan-text-content">{plan.text}</p>
+                        </div>
+                        <div className="plan-actions">
+                          <button
+                            className="edit-dots-btn"
+                            onClick={() => startEditing(plan)}
+                          >
+                            ⋮
+                          </button>
+                        </div>
                       </div>
+                    ),
+                  )
+                : !isAddingPlan && (
+                    <div className="empty-state-wrapper">
+                      <p className="empty-plans-hint">
+                        Планів ще немає. Додайте перший!
+                      </p>
                     </div>
-                  </div>
-                ) : (
-                  <div key={plan.id} className={`plan-item-row ${getCategoryClass(plan.type)} ${plan.completed ? "is-done" : ""}`}>
-                    <div className="custom-checkbox" onClick={() => togglePlan(plan.id)}>{plan.completed && "✓"}</div>
-                    <div className="plan-display-text">
-                      {plan.time && <span className="plan-time-display">{plan.time}</span>}
-                      <p className="plan-text-content">{plan.text}</p>
-                    </div>
-                    <div className="plan-actions">
-                      <button className="edit-dots-btn" onClick={() => startEditing(plan)}>⋮</button>
-                    </div>
-                  </div>
-                )
-              )) : !isAddingPlan && (
-                <div className="empty-state-wrapper"><p className="empty-plans-hint">Планів ще немає. Додайте перший!</p></div>
-              )}
+                  )}
             </div>
 
             {/* Додавання нового плану */}
@@ -422,51 +618,122 @@ export const CalendarPage = () => {
                   onChange={(e) => setNewPlanText(e.target.value)}
                   autoFocus
                 ></textarea>
-                <div className="plan-controls-grid" style={{ display: "flex", gap: "12px" }}>
-                  <div className="control-group-interactive" onClick={() => setActiveDropdown(activeDropdown === "add-time" ? null : "add-time")}>
+                <div
+                  className="plan-controls-grid"
+                  style={{ display: "flex", gap: "12px" }}
+                >
+                  <div
+                    className="control-group-interactive"
+                    onClick={() =>
+                      setActiveDropdown(
+                        activeDropdown === "add-time" ? null : "add-time",
+                      )
+                    }
+                  >
                     <label>Час :</label>
                     <div className="custom-select-trigger">
                       <span>{planTime || "-- : --"}</span>
-                      <span className={`arrow ${activeDropdown === "add-time" ? "up" : ""}`}>▾</span>
+                      <span
+                        className={`arrow ${activeDropdown === "add-time" ? "up" : ""}`}
+                      >
+                        ▾
+                      </span>
                     </div>
                     {activeDropdown === "add-time" && (
-                      <div className="time-picker-popup" onClick={(e) => e.stopPropagation()}>
+                      <div
+                        className="time-picker-popup"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <div className="time-columns-container">
                           <div className="time-column">
                             <p className="column-label">Години</p>
                             {hours.map((h) => (
-                              <div key={h} className={`time-opt ${planTime.split(":")[0] === h ? "active" : ""}`}
-                                onClick={() => setPlanTime(`${h}:${planTime.split(":")[1] || "00"}`)}>{h}</div>
+                              <div
+                                key={h}
+                                className={`time-opt ${planTime.split(":")[0] === h ? "active" : ""}`}
+                                onClick={() =>
+                                  setPlanTime(
+                                    `${h}:${planTime.split(":")[1] || "00"}`,
+                                  )
+                                }
+                              >
+                                {h}
+                              </div>
                             ))}
                           </div>
                           <div className="time-column">
                             <p className="column-label">Хвилини</p>
                             {minutes.map((m) => (
-                              <div key={m} className={`time-opt ${planTime.split(":")[1] === m ? "active" : ""}`}
-                                onClick={() => setPlanTime(`${planTime.split(":")[0] || "12"}:${m}`)}>{m}</div>
+                              <div
+                                key={m}
+                                className={`time-opt ${planTime.split(":")[1] === m ? "active" : ""}`}
+                                onClick={() =>
+                                  setPlanTime(
+                                    `${planTime.split(":")[0] || "12"}:${m}`,
+                                  )
+                                }
+                              >
+                                {m}
+                              </div>
                             ))}
                           </div>
                         </div>
-                        <button type="button" className="time-done-btn" onClick={() => setActiveDropdown(null)}>Готово</button>
+                        <button
+                          type="button"
+                          className="time-done-btn"
+                          onClick={() => setActiveDropdown(null)}
+                        >
+                          Готово
+                        </button>
                       </div>
                     )}
                   </div>
-                  <div className="control-group-interactive" onClick={() => setActiveDropdown(activeDropdown === "add-category" ? null : "add-category")}>
+                  <div
+                    className="control-group-interactive"
+                    onClick={() =>
+                      setActiveDropdown(
+                        activeDropdown === "add-category"
+                          ? null
+                          : "add-category",
+                      )
+                    }
+                  >
                     <label>Категорія :</label>
                     <div className="custom-select-trigger">
                       <span>{planType}</span>
-                      <span className={`arrow ${activeDropdown === "add-category" ? "up" : ""}`}>▾</span>
+                      <span
+                        className={`arrow ${activeDropdown === "add-category" ? "up" : ""}`}
+                      >
+                        ▾
+                      </span>
                     </div>
                     {activeDropdown === "add-category" && (
-                      <ul className="custom-dropdown-list upwards" onClick={(e) => e.stopPropagation()}>
+                      <ul
+                        className="custom-dropdown-list upwards"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         {categories.map((cat) => (
-                          <li key={cat} onClick={() => { setPlanType(cat); setActiveDropdown(null); }}
-                            className={planType === cat ? "active" : ""}>{cat}</li>
+                          <li
+                            key={cat}
+                            onClick={() => {
+                              setPlanType(cat);
+                              setActiveDropdown(null);
+                            }}
+                            className={planType === cat ? "active" : ""}
+                          >
+                            {cat}
+                          </li>
                         ))}
                       </ul>
                     )}
                   </div>
-                  <button type="button" className="save-plans-btn-refined" onClick={addPlan}>Зберегти</button>
+                  <button
+                    type="button"
+                    className="save-plans-btn-refined"
+                    onClick={addPlan}
+                  >
+                    Зберегти
+                  </button>
                 </div>
               </div>
             )}
