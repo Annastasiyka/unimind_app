@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import localforage from "localforage";
 import { Calculator, NotebookPen, TableOfContents } from "lucide-react";
 import {
   HeadCircuitIcon,
@@ -19,13 +20,19 @@ import { LoginPage } from "./pages/LoginPage";
 import { SignupPage } from "./pages/SignupPage";
 import { SemesterDashboard } from "./pages/SemesterDashboard";
 
+// Налаштування бази даних IndexedDB
+localforage.config({
+  name: "UniMind",
+  storeName: "app_state",
+});
+
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
+// --- Інтерфейси ---
 interface ZoomEvent extends Event {
   ctrlKey?: boolean;
   scale?: number;
 }
-
 interface Task {
   id: string;
   type: string;
@@ -52,7 +59,6 @@ interface Plan {
   completed: boolean;
   [key: string]: unknown;
 }
-
 interface UserData {
   id: number;
   name: string;
@@ -67,43 +73,14 @@ interface UserData {
 }
 
 function App() {
-  const [currentScreen, setCurrentScreen] = useState<string>(() => {
-    const isLoggedIn = localStorage.getItem("isLoggedIn");
-    const isGuest = localStorage.getItem("isGuest");
-    if (isLoggedIn === "true" || isGuest === "true") return "main";
-    return "start";
-  });
-
-  const [selectedSemesterId, setSelectedSemesterId] = useState<string | null>(null);
-
-  const [name, setName] = useState<string>(() => {
-    const isGuest = localStorage.getItem("isGuest") === "true";
-    const saved = localStorage.getItem("userData");
-    if (isGuest) return "Гість";
-    if (saved && saved !== "undefined") {
-      try {
-        const parsed = JSON.parse(saved);
-        return parsed.name || "";
-      } catch {
-        return "";
-      }
-    }
-    return "";
-  });
-
-  const [email, setEmail] = useState<string>(() => {
-    const saved = localStorage.getItem("userData");
-    if (saved && saved !== "undefined") {
-      try {
-        const parsed = JSON.parse(saved);
-        return parsed.email || "";
-      } catch {
-        return "";
-      }
-    }
-    return "";
-  });
-
+  const [isAppLoading, setIsAppLoading] = useState(true);
+  const [currentScreen, setCurrentScreen] = useState<string>("start");
+  const [selectedSemesterId, setSelectedSemesterId] = useState<string | null>(
+    null,
+  );
+  const [name, setName] = useState<string>("");
+  const [email, setEmail] = useState<string>("");
+  const [avatar, setAvatar] = useState<string | null>(null); // Стан для аватара
   const [password, setPassword] = useState<string>("");
   const [confirmPassword, setConfirmPassword] = useState<string>("");
   const [error, setError] = useState<string>("");
@@ -115,39 +92,84 @@ function App() {
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [syncType, setSyncType] = useState<"register" | "login">("register");
 
+  // Автоматична міграція старих даних з localStorage при першому запуску
+  const migrateFromLocalStorage = async () => {
+    const migratedFlag = await localforage.getItem("migrated_to_idb");
+    if (!migratedFlag) {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key) {
+          let val = localStorage.getItem(key);
+          try {
+            val = JSON.parse(val as string);
+          } catch {
+            void 0;
+          }
+          await localforage.setItem(key, val);
+        }
+      }
+      await localforage.setItem("migrated_to_idb", true);
+    }
+  };
+
+  // Ініціалізація додатку при старті
+  useEffect(() => {
+    const initApp = async () => {
+      await migrateFromLocalStorage();
+
+      const isLoggedIn = await localforage.getItem("isLoggedIn");
+      const isGuest = await localforage.getItem("isGuest");
+      const savedUser = await localforage.getItem<UserData>("userData");
+
+      if (isGuest === "true") {
+        setName("Гість");
+        setAvatar(null);
+        setCurrentScreen("main");
+      } else if (isLoggedIn === "true" && savedUser) {
+        setName(savedUser.name || "");
+        setEmail(savedUser.email || "");
+        setAvatar(savedUser.avatar || null);
+        setCurrentScreen("main");
+      }
+
+      setIsAppLoading(false);
+    };
+    initApp();
+  }, []);
+
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth <= 768);
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  // Відстеження змін в даних користувача
   useEffect(() => {
-    const handleStorageChange = () => {
-      const saved = localStorage.getItem("userData");
-      if (saved && saved !== "undefined") {
-        try {
-          const newUser = JSON.parse(saved);
-          if (name !== "Гість" && name !== "" && name !== newUser.name) {
-            const keys = [
-              "unimind-semesters",
-              "unimind-plans",
-              "unimind-work-times",
-              "unimind-active-days",
-            ];
-            keys.forEach((key) => {
-              const oldData = localStorage.getItem(`${key}-${name}`);
-              if (oldData) {
-                localStorage.setItem(`${key}-${newUser.name}`, oldData);
-                localStorage.removeItem(`${key}-${name}`);
-              }
-            });
+    const handleStorageChange = async () => {
+      const savedUser = await localforage.getItem<UserData>("userData");
+      const isGuest = await localforage.getItem("isGuest");
+
+      if (savedUser) {
+        if (name !== "Гість" && name !== "" && name !== savedUser.name) {
+          const keys = [
+            "unimind-semesters",
+            "unimind-plans",
+            "unimind-work-times",
+            "unimind-active-days",
+          ];
+          for (const key of keys) {
+            const oldData = await localforage.getItem(`${key}-${name}`);
+            if (oldData) {
+              await localforage.setItem(`${key}-${savedUser.name}`, oldData);
+              await localforage.removeItem(`${key}-${name}`);
+            }
           }
-          setName(newUser.name);
-        } catch {
-          console.error("Error updating profile name");
         }
-      } else if (localStorage.getItem("isGuest") === "true") {
+        setName(savedUser.name);
+        setAvatar(savedUser.avatar || null);
+      } else if (isGuest === "true") {
         setName("Гість");
+        setAvatar(null);
       }
     };
     window.addEventListener("userDataUpdated", handleStorageChange);
@@ -155,6 +177,7 @@ function App() {
       window.removeEventListener("userDataUpdated", handleStorageChange);
   }, [name]);
 
+  // Запобігання зуму на мобільних
   useEffect(() => {
     const restrictedScreens = ["start", "signup", "login", "main"];
     const preventZoom = (e: Event) => {
@@ -173,61 +196,66 @@ function App() {
     };
   }, [currentScreen]);
 
-  const populateLocalStorageFromDB = (user: UserData) => {
-    if (user.semesters) {
-      localStorage.setItem(`unimind-semesters-${user.name}`, JSON.stringify(user.semesters));
-    }
-    if (user.plans) {
-      localStorage.setItem(`unimind-plans-${user.name}`, JSON.stringify(user.plans));
-    }
+  // Робота з IndexedDB
+  const populateLocalStorageFromDB = async (user: UserData) => {
+    if (user.semesters)
+      await localforage.setItem(
+        `unimind-semesters-${user.name}`,
+        user.semesters,
+      );
+    if (user.plans)
+      await localforage.setItem(`unimind-plans-${user.name}`, user.plans);
     if (user.workSchedule) {
       if (user.workSchedule.times)
-        localStorage.setItem(
+        await localforage.setItem(
           `unimind-work-times-${user.name}`,
-          JSON.stringify(user.workSchedule.times),
+          user.workSchedule.times,
         );
       if (user.workSchedule.days)
-        localStorage.setItem(
+        await localforage.setItem(
           `unimind-active-days-${user.name}`,
-          JSON.stringify(user.workSchedule.days),
+          user.workSchedule.days,
         );
     }
   };
 
-  const migrateAllGuestData = (userName: string) => {
+  const migrateAllGuestData = async (userName: string) => {
     const dataKeys = [
       "unimind-plans",
       "unimind-semesters",
       "unimind-work-times",
       "unimind-active-days",
     ];
-    dataKeys.forEach((key) => {
-      const guestData = localStorage.getItem(`${key}-guest`);
-      if (guestData && guestData !== "undefined") {
-        localStorage.setItem(`${key}-${userName}`, guestData);
-        localStorage.removeItem(`${key}-guest`);
+    for (const key of dataKeys) {
+      const guestData = await localforage.getItem(`${key}-guest`);
+      if (guestData) {
+        await localforage.setItem(`${key}-${userName}`, guestData);
+        await localforage.removeItem(`${key}-guest`);
       }
-    });
+    }
   };
 
   const syncWithBackend = async (userId: number, userName: string) => {
     try {
-      const semesters = localStorage.getItem(`unimind-semesters-${userName}`);
-      const plans = localStorage.getItem(`unimind-plans-${userName}`);
-      const workTimes = localStorage.getItem(`unimind-work-times-${userName}`);
-      const activeDays = localStorage.getItem(`unimind-active-days-${userName}`);
+      const semesters = await localforage.getItem(
+        `unimind-semesters-${userName}`,
+      );
+      const plans = await localforage.getItem(`unimind-plans-${userName}`);
+      const workTimes = await localforage.getItem(
+        `unimind-work-times-${userName}`,
+      );
+      const activeDays = await localforage.getItem(
+        `unimind-active-days-${userName}`,
+      );
 
       await fetch(`${API_URL}/sync/all`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userId,
-          semesters: semesters ? JSON.parse(semesters) : [],
-          plans: plans ? JSON.parse(plans) : [],
-          workSchedule: {
-            times: workTimes ? JSON.parse(workTimes) : {},
-            days: activeDays ? JSON.parse(activeDays) : {},
-          },
+          semesters: semesters || [],
+          plans: plans || [],
+          workSchedule: { times: workTimes || {}, days: activeDays || {} },
         }),
       });
     } catch {
@@ -235,39 +263,50 @@ function App() {
     }
   };
 
-  const finalizeRegistration = (sync: boolean) => {
-    const savedData = localStorage.getItem("userData");
-    if (savedData && savedData !== "undefined") {
-      const user = JSON.parse(savedData);
+  const finalizeRegistration = async (sync: boolean) => {
+    const savedData = await localforage.getItem<UserData>("userData");
+    const guestKeys = [
+      "unimind-plans-guest",
+      "unimind-semesters-guest",
+      "unimind-work-times-guest",
+      "unimind-active-days-guest",
+    ];
+
+    if (savedData) {
       if (sync) {
-        migrateAllGuestData(user.name);
-        syncWithBackend(user.id, user.name);
+        await migrateAllGuestData(savedData.name);
+        await syncWithBackend(savedData.id, savedData.name);
       } else {
-        [
-          "unimind-plans",
-          "unimind-semesters",
-          "unimind-work-times",
-          "unimind-active-days",
-        ].forEach((k) => localStorage.removeItem(`${k}-guest`));
+        for (const k of guestKeys) await localforage.removeItem(k);
       }
+      setAvatar(savedData.avatar || null);
     }
-    localStorage.setItem("isLoggedIn", "true");
-    localStorage.removeItem("isGuest");
+    await localforage.setItem("isLoggedIn", "true");
+    await localforage.setItem("isGuest", "false");
     setShowSyncModal(false);
     setCurrentScreen("main");
   };
 
-  const finalizeLogin = (sync: boolean) => {
-    const savedData = localStorage.getItem("userData");
-    if (savedData && savedData !== "undefined") {
-      const user = JSON.parse(savedData);
+  const finalizeLogin = async (sync: boolean) => {
+    const savedData = await localforage.getItem<UserData>("userData");
+    const guestKeys = [
+      "unimind-plans-guest",
+      "unimind-semesters-guest",
+      "unimind-work-times-guest",
+      "unimind-active-days-guest",
+    ];
+
+    if (savedData) {
       if (sync) {
-        migrateAllGuestData(user.name);
-        syncWithBackend(user.id, user.name);
+        await migrateAllGuestData(savedData.name);
+        await syncWithBackend(savedData.id, savedData.name);
+      } else {
+        for (const k of guestKeys) await localforage.removeItem(k);
       }
+      setAvatar(savedData.avatar || null);
     }
-    localStorage.setItem("isLoggedIn", "true");
-    localStorage.removeItem("isGuest");
+    await localforage.setItem("isLoggedIn", "true");
+    await localforage.setItem("isGuest", "false");
     setShowSyncModal(false);
     setCurrentScreen("main");
   };
@@ -276,75 +315,89 @@ function App() {
     setIsShaking(true);
     setTimeout(() => setIsShaking(false), 400);
   };
+
   const clearInputs = () => {
     setPassword("");
     setConfirmPassword("");
     setError("");
   };
-  const handleGuestEntry = () => {
-    localStorage.setItem("isGuest", "true");
-    localStorage.setItem("isLoggedIn", "false");
+
+  const handleGuestEntry = async () => {
+    const guestKeys = [
+      "unimind-plans-guest",
+      "unimind-semesters-guest",
+      "unimind-work-times-guest",
+      "unimind-active-days-guest",
+    ];
+    for (const key of guestKeys) {
+      await localforage.removeItem(key);
+    }
+    await localforage.removeItem("userData"); // Важливо видалити старого юзера
+    await localforage.setItem("isGuest", "true");
+    await localforage.setItem("isLoggedIn", "false");
     setName("Гість");
+    setAvatar(null);
+    setEmail("");
     setCurrentScreen("main");
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("userData");
-    localStorage.removeItem("isLoggedIn");
-    localStorage.removeItem("isGuest");
+  const handleLogout = async () => {
+    await localforage.removeItem("userData");
+    await localforage.removeItem("isLoggedIn");
+    await localforage.removeItem("isGuest");
     setName("");
+    setAvatar(null);
     setEmail("");
     setCurrentScreen("start");
   };
 
   const handlRegister = async () => {
-  setError("");
-  if (!name || !email || !password || !confirmPassword) {
-    setError("Заповніть всі поля");
-    triggerShake();
-    return;
-  }
-  if (password !== confirmPassword) {
-    setError("Паролі не збігаються");
-    triggerShake();
-    return;
-  }
-  try {
-    const response = await fetch(`${API_URL}/auth/signup`, { 
-      method: "POST", 
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        name: name.trim(),
-        email: email.trim(), 
-        password: password 
-      }),
-    });
+    setError("");
+    if (!name || !email || !password || !confirmPassword) {
+      setError("Заповніть всі поля");
+      triggerShake();
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError("Паролі не збігаються");
+      triggerShake();
+      return;
+    }
+    try {
+      const response = await fetch(`${API_URL}/auth/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          email: email.trim(),
+          password,
+        }),
+      });
 
-    const data = await response.json();
+      const data = await response.json();
 
-    if (response.ok) {
-      localStorage.setItem("userData", JSON.stringify(data.user));
-      const guestData = localStorage.getItem("unimind-semesters-guest");
-      
-      if (
-        localStorage.getItem("isGuest") === "true" &&
-        guestData &&
-        JSON.parse(guestData).length > 0
-      ) {
-        setSyncType("register");
-        setShowSyncModal(true);
+      if (response.ok) {
+        await localforage.setItem("userData", data.user);
+        const guestData = await localforage.getItem<Semester[]>(
+          "unimind-semesters-guest",
+        );
+        const isGuest = await localforage.getItem("isGuest");
+
+        if (isGuest === "true" && guestData && guestData.length > 0) {
+          setSyncType("register");
+          setShowSyncModal(true);
+        } else {
+          await finalizeRegistration(false);
+        }
       } else {
-        finalizeRegistration(false);
+        setError(data.message || "Помилка реєстрації");
+        triggerShake();
       }
-    } else {
-      setError(data.message || "Помилка реєстрації");
+    } catch {
+      setError("Сервер недоступний");
       triggerShake();
     }
-  } catch {
-    setError("Сервер недоступний");
-    triggerShake();
-  }
-};
+  };
 
   const handleLogin = async () => {
     setError("");
@@ -364,17 +417,22 @@ function App() {
       const data = await response.json();
 
       if (response.ok) {
-        localStorage.setItem("userData", JSON.stringify(data.user));
-        localStorage.setItem("isLoggedIn", "true");
-        populateLocalStorageFromDB(data.user);
+        await localforage.setItem("userData", data.user);
+        await localforage.setItem("isLoggedIn", "true");
+        await populateLocalStorageFromDB(data.user);
         setName(data.user.name);
+        setAvatar(data.user.avatar || null);
 
-        const guestData = localStorage.getItem("unimind-semesters-guest");
-        if (localStorage.getItem("isGuest") === "true" && guestData && JSON.parse(guestData).length > 0) {
+        const guestData = await localforage.getItem<Semester[]>(
+          "unimind-semesters-guest",
+        );
+        const isGuest = await localforage.getItem("isGuest");
+
+        if (isGuest === "true" && guestData && guestData.length > 0) {
           setSyncType("login");
           setShowSyncModal(true);
         } else {
-          localStorage.removeItem("isGuest");
+          await localforage.removeItem("isGuest");
           setCurrentScreen("main");
         }
       } else {
@@ -386,6 +444,10 @@ function App() {
       triggerShake();
     }
   };
+
+  if (isAppLoading) {
+    return <div className="loading-screen">Завантаження UniMind...</div>;
+  }
 
   const renderPageContent = () => {
     switch (currentScreen) {
@@ -549,13 +611,14 @@ function App() {
                       gap: "10px",
                     }}
                   >
-                    <div className="profile-icon-name"
+                    <div
+                      className="profile-icon-name"
                       style={{
                         width: "40px",
                         height: "40px",
                         borderRadius: "50%",
                         background:
-                          localStorage.getItem("isGuest") === "true"
+                          name === "Гість"
                             ? "rgba(255, 255, 255, 0.25)"
                             : "#b1a7ff",
                         display: "flex",
@@ -564,58 +627,38 @@ function App() {
                         overflow: "hidden",
                         border: "1px solid rgba(255, 255, 255, 0.6)",
                         boxShadow:
-                          localStorage.getItem("isGuest") === "true"
+                          name === "Гість"
                             ? "inset 0 0 10px rgba(255, 255, 255, 0.4)"
                             : "none",
                       }}
                     >
-                      {(() => {
-                        const isGuestMode =
-                          localStorage.getItem("isGuest") === "true";
-                        const saved = localStorage.getItem("userData");
-
-                        if (isGuestMode) {
-                          return (
-                            <FontAwesomeIcon
-                              icon={faUserGraduate}
-                              style={{ color: "#5c4b75", fontSize: "20px" }}
-                            />
-                          );
-                        }
-
-                        if (saved && saved !== "undefined") {
-                          try {
-                            const parsed = JSON.parse(saved);
-                            if (parsed.avatar)
-                              return (
-                                <img
-                                  src={parsed.avatar}
-                                  alt="Avatar"
-                                  style={{
-                                    width: "100%",
-                                    height: "100%",
-                                    objectFit: "cover",
-                                  }}
-                                />
-                              );
-                          } catch {
-                            /* ignore */
-                          }
-                        }
-
-                        return (
-                          <span
-                            style={{
-                              color: "#5c4b75",
-                              fontWeight: "bold",
-                              fontSize: "22px",
-                              fontFamily: "serif",
-                            }}
-                          >
-                            {name.charAt(0).toUpperCase() || "A"}
-                          </span>
-                        );
-                      })()}
+                      {name === "Гість" ? (
+                        <FontAwesomeIcon
+                          icon={faUserGraduate}
+                          style={{ color: "#5c4b75", fontSize: "20px" }}
+                        />
+                      ) : avatar ? (
+                        <img
+                          src={avatar}
+                          alt="Avatar"
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                          }}
+                        />
+                      ) : (
+                        <span
+                          style={{
+                            color: "#5c4b75",
+                            fontWeight: "bold",
+                            fontSize: "20px",
+                            fontFamily: "serif",
+                          }}
+                        >
+                          {name.charAt(0).toUpperCase() || "A"}
+                        </span>
+                      )}
                     </div>
                     <span
                       className="account-name"

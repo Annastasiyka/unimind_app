@@ -1,10 +1,23 @@
-
+import { motion } from "framer-motion"; // Тільки додаємо анімації
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faUserGraduate } from "@fortawesome/free-solid-svg-icons";
 import React, { useState, useRef, useEffect } from "react";
+import localforage from "localforage";
 import { Clock, User, Shield, Pencil, ChevronDown, LogOut, Check, Eye, EyeOff, Lock } from "lucide-react";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+
+// --- ІНТЕРФЕЙСИ ---
+interface UserData {
+  id: number;
+  name: string;
+  email: string;
+  avatar?: string | null;
+  workSchedule?: {
+    times?: Record<string, string>;
+    days?: Record<string, boolean>;
+  };
+}
 
 interface ProfilePageProps {
   handleLogout: () => void;
@@ -15,6 +28,7 @@ const hours = Array.from({ length: 24 }, (_, i) =>
   i < 10 ? `0${i}:00` : `${i}:00`,
 );
 
+// --- ДОПОМІЖНІ ФУНКЦІЇ ---
 const resizeAvatar = (base64Str: string): Promise<string> => {
   return new Promise((resolve) => {
     const img = new Image();
@@ -40,46 +54,18 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
   handleLogout,
   setCurrentScreen,
 }) => {
-  const isGuest = localStorage.getItem("isGuest") === "true";
-  const [openPicker, setOpenPicker] = useState<string | null>(null);
-
   // --- СТАНИ ---
-  const [selectedTime, setSelectedTime] = useState<{ [key: string]: string }>(() => {
-    const saved = localStorage.getItem("unimind-work-times");
-    return saved ? JSON.parse(saved) : {};
+  const [isLoading, setIsLoading] = useState(true); // Для контролю плавності
+  const [isGuest, setIsGuest] = useState<boolean>(false);
+  const [userName, setUserName] = useState("");
+  const [avatar, setAvatar] = useState<string | null>(null);
+  const [selectedTime, setSelectedTime] = useState<{ [key: string]: string }>({});
+  const [activeDays, setActiveDays] = useState<{ [key: string]: boolean }>({
+    "Понеділок": true, "Вівторок": true, "Середа": true, 
+    "Четвер": true, "П'ятниця": true, "Субота": false, "Неділя": false
   });
 
-  const [activeDays, setActiveDays] = useState<{ [key: string]: boolean }>(() => {
-    const saved = localStorage.getItem("unimind-active-days");
-    if (saved) return JSON.parse(saved);
-    return {
-      "Понеділок": true, "Вівторок": true, "Середа": true, 
-      "Четвер": true, "П'ятниця": true, "Субота": false, "Неділя": false
-    };
-  });
-
-  const [userName, setUserName] = useState(() => {
-    const storedData = localStorage.getItem("userData");
-    if (storedData) {
-      try {
-        const parsed = JSON.parse(storedData);
-        return parsed.name || "Користувач";
-      } catch { return "Користувач"; }
-    }
-    return "Гість";
-  });
-
-  const [avatar, setAvatar] = useState<string | null>(() => {
-    const storedData = localStorage.getItem("userData");
-    if (storedData) {
-      try {
-        const parsed = JSON.parse(storedData);
-        return parsed.avatar || null;
-      } catch { return null; }
-    }
-    return null;
-  });
-
+  const [openPicker, setOpenPicker] = useState<string | null>(null);
   const [isSecurityOpen, setIsSecurityOpen] = useState(false);
   const [isWorkHoursOpen, setIsWorkHoursOpen] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
@@ -94,14 +80,27 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [isEditingName, setIsEditingName] = useState(false);
 
+  // --- ІНІЦІАЛІЗАЦІЯ ---
   useEffect(() => {
-    const loadProfileFromServer = async () => {
-      if (!isGuest) {
+    const initProfile = async () => {
+      const guestStatus = await localforage.getItem("isGuest") === "true";
+      setIsGuest(guestStatus);
+
+      const storedUser = await localforage.getItem<UserData>("userData");
+      const nameKey = guestStatus ? "Гість" : (storedUser?.name || "user");
+
+      setUserName(guestStatus ? "Гість" : (storedUser?.name || "Користувач"));
+      setAvatar(storedUser?.avatar || null);
+
+      const savedTimes = await localforage.getItem<{ [key: string]: string }>(`unimind-work-times-${nameKey}`);
+      if (savedTimes) setSelectedTime(savedTimes);
+
+      const savedDays = await localforage.getItem<{ [key: string]: boolean }>(`unimind-active-days-${nameKey}`);
+      if (savedDays) setActiveDays(savedDays);
+
+      if (!guestStatus && storedUser?.id) {
         try {
-          const storedData = localStorage.getItem("userData");
-          const userId = storedData ? JSON.parse(storedData).id : null;
-          if (!userId) return;
-          const response = await fetch(`${API_URL}/profile/${userId}`);
+          const response = await fetch(`${API_URL}/profile/${storedUser.id}`);
           const data = await response.json();
           if (response.ok) {
             setUserName(data.name);
@@ -112,93 +111,87 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
             }
           }
         } catch (error) {
-          console.error("Помилка синхронізації:", error);
+          console.error("Помилка:", error);
         }
       }
+      setIsLoading(false); // Все завантажили — вмикаємо видимість
     };
-    loadProfileFromServer();
-  }, [isGuest]);
+    initProfile();
+  }, []);
 
+  // --- ФУНКЦІЇ ЗБЕРЕЖЕННЯ --- (Твій оригінальний код без змін)
   const saveWorkSchedule = async (newTimes: { [key: string]: string }, newActiveDays: { [key: string]: boolean }) => {
-    localStorage.setItem("unimind-work-times", JSON.stringify(newTimes));
-    localStorage.setItem("unimind-active-days", JSON.stringify(newActiveDays));
+    const nameKey = isGuest ? "Гість" : userName;
+    await localforage.setItem(`unimind-work-times-${nameKey}`, newTimes);
+    await localforage.setItem(`unimind-active-days-${nameKey}`, newActiveDays);
     if (!isGuest) {
       try {
-        const userId = JSON.parse(localStorage.getItem("userData") || "{}").id;
-        await fetch(`${API_URL}/profile/update-schedule`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId, schedule: { times: newTimes, days: newActiveDays } }),
-        });
-      } catch (error) { console.error("Помилка графіка:", error); }
+        const storedUser = await localforage.getItem<UserData>("userData");
+        if (storedUser?.id) {
+          await fetch(`${API_URL}/profile/update-schedule`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId: storedUser.id, schedule: { times: newTimes, days: newActiveDays } }),
+          });
+        }
+      } catch (error) { console.error(error); }
     }
   };
 
   const saveUserData = async (newName: string, newAvatar: string | null) => {
-    if (!isGuest) {
+    const storedUser = (await localforage.getItem<UserData>("userData")) || ({} as UserData);
+    if (!isGuest && storedUser.id) {
       try {
-        const userId = JSON.parse(localStorage.getItem("userData") || "{}").id;
         const response = await fetch(`${API_URL}/profile/update-info`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId, name: newName, avatar: newAvatar }),
+          body: JSON.stringify({ userId: storedUser.id, name: newName, avatar: newAvatar }),
         });
         if (response.ok) {
           const data = await response.json();
-          const stored = JSON.parse(localStorage.getItem("userData") || "{}");
-          localStorage.setItem("userData", JSON.stringify({ ...stored, name: data.user.name, avatar: data.user.avatar }));
+          const updatedUser = { ...storedUser, name: data.user.name, avatar: data.user.avatar };
+          await localforage.setItem("userData", updatedUser);
           window.dispatchEvent(new Event("userDataUpdated"));
         }
-      } catch (error) { console.error("Помилка профілю:", error); }
+      } catch (error) { console.error(error); }
     } else {
-      const stored = JSON.parse(localStorage.getItem("userData") || "{}");
-      localStorage.setItem("userData", JSON.stringify({ ...stored, name: newName, avatar: newAvatar }));
+      const updatedUser = { ...storedUser, name: newName, avatar: newAvatar };
+      await localforage.setItem("userData", updatedUser);
       window.dispatchEvent(new Event("userDataUpdated"));
     }
   };
 
   const handlePasswordChange = async () => {
     setPasswordMessage("");
-    if (!currentPassword || !newPassword || !confirmNewPassword) {
-      setPasswordMessage("Заповніть усі поля."); return;
-    }
-    if (newPassword !== confirmNewPassword) {
-      setPasswordMessage("Нові паролі не співпадають."); return;
-    }
+    if (!currentPassword || !newPassword || !confirmNewPassword) { setPasswordMessage("Заповніть усі поля."); return; }
+    if (newPassword !== confirmNewPassword) { setPasswordMessage("Нові паролі не співпадають."); return; }
     try {
-      const userId = JSON.parse(localStorage.getItem("userData") || "{}").id;
+      const storedUser = await localforage.getItem<UserData>("userData");
+      if (!storedUser?.id) return;
       const response = await fetch(`${API_URL}/profile/update-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, currentPassword, newPassword }),
+        body: JSON.stringify({ userId: storedUser.id, currentPassword, newPassword }),
       });
       const data = await response.json();
       if (response.ok) {
         setPasswordMessage("Пароль успішно змінено!");
         setCurrentPassword(""); setNewPassword(""); setConfirmNewPassword("");
-      } else { setPasswordMessage(data.message || "Помилка пароля"); }
+      } else { setPasswordMessage(data.message || "Помилка"); }
     } catch { setPasswordMessage("Сервер недоступний"); }
   };
 
+  // --- ОБРОБНИКИ ---
   const handlePhotoClick = () => fileInputRef.current?.click();
-
-  const handleNameEditClick = () => {
-    setIsEditingName(true);
-    setTimeout(() => nameInputRef.current?.focus(), 0);
-  };
-
-  const handleNameSave = () => {
-    setIsEditingName(false);
-    saveUserData(userName, avatar);
-  };
+  const handleNameEditClick = () => { setIsEditingName(true); setTimeout(() => nameInputRef.current?.focus(), 0); };
+  const handleNameSave = () => { setIsEditingName(false); saveUserData(userName, avatar); };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
       reader.onloadend = async () => {
-        const originalBase64 = reader.result as string;
-        const resizedBase64 = await resizeAvatar(originalBase64);
+        const resizedBase64 = await resizeAvatar(reader.result as string);
         setAvatar(resizedBase64);
         saveUserData(userName, resizedBase64); 
       };
@@ -221,15 +214,17 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
 
   const days = ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця", "Субота", "Неділя"];
 
+  // Поки вантажиться — невидимий блок, щоб не було дрижання
+  if (isLoading) return <div className="profile-container" style={{ opacity: 0 }} />;
+
   return (
-    <div className="profile-container">
-      <input 
-        type="file" 
-        accept="image/*" 
-        ref={fileInputRef} 
-        onChange={handleFileChange} 
-        style={{ display: "none" }} 
-      />
+    <motion.div 
+      className="profile-container"
+      initial={{ opacity: 0 }} 
+      animate={{ opacity: 1 }} 
+      transition={{ duration: 0.3 }}
+    >
+      <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileChange} style={{ display: "none" }} />
 
       <div className="prof-body">
         {isGuest ? (
@@ -260,50 +255,32 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
                     <div className="day-info">
                       <span className="day-label">{day}</span>
                       <label className="switch">
-                        <input
-                          type="checkbox"
-                          checked={activeDays[day]}
-                          onChange={() => handleToggleDay(day)}
-                        />
+                        <input type="checkbox" checked={activeDays[day]} onChange={() => handleToggleDay(day)} />
                         <span className="slider round"></span>
                       </label>
                     </div>
 
                     <div className="time-controls" style={{ opacity: activeDays[day] ? 1 : 0.5, pointerEvents: activeDays[day] ? "auto" : "none" }}>
                       <div className="custom-dropdown-container">
-                        <div
-                          className="time-picker-trigger"
-                          onClick={() => setOpenPicker(openPicker === `${day}-from` ? null : `${day}-from`)}
-                        >
+                        <div className="time-picker-trigger" onClick={() => setOpenPicker(openPicker === `${day}-from` ? null : `${day}-from`)}>
                           <Clock size={18} color="#5c4b75" />
                           <span>{selectedTime[`${day}-from`] || "09:00"}</span>
                         </div>
                         {openPicker === `${day}-from` && (
                           <div className="dropdown-list-portal">
-                            {hours.map((h) => (
-                              <div key={h} className="dropdown-item" onClick={() => handleSelect(day, "from", h)}>
-                                {h}
-                              </div>
-                            ))}
+                            {hours.map((h) => <div key={h} className="dropdown-item" onClick={() => handleSelect(day, "from", h)}>{h}</div>)}
                           </div>
                         )}
                       </div>
                       <span className="separator">—</span>
                       <div className="custom-dropdown-container">
-                        <div
-                          className="time-picker-trigger"
-                          onClick={() => setOpenPicker(openPicker === `${day}-to` ? null : `${day}-to`)}
-                        >
+                        <div className="time-picker-trigger" onClick={() => setOpenPicker(openPicker === `${day}-to` ? null : `${day}-to`)}>
                           <Clock size={18} color="#5c4b75" />
                           <span>{selectedTime[`${day}-to`] || "17:00"}</span>
                         </div>
                         {openPicker === `${day}-to` && (
                           <div className="dropdown-list-portal">
-                            {hours.map((h) => (
-                              <div key={h} className="dropdown-item" onClick={() => handleSelect(day, "to", h)}>
-                                {h}
-                              </div>
-                            ))}
+                            {hours.map((h) => <div key={h} className="dropdown-item" onClick={() => handleSelect(day, "to", h)}>{h}</div>)}
                           </div>
                         )}
                       </div>
@@ -492,6 +469,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
           </div>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 };

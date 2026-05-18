@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import localforage from "localforage";
 import { 
   BookOpenText, ChartBar, Atom, Books, GlobeHemisphereWest, 
   Microscope, MathOperations, Calculator, Laptop, PenNib, 
@@ -7,7 +8,14 @@ import {
   GraduationCap
 } from "@phosphor-icons/react";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000/api";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+
+// --- ІНТЕРФЕЙСИ ---
+interface UserData {
+  id: number;
+  name: string;
+  email: string;
+}
 
 interface Task {
   id: string;
@@ -29,6 +37,7 @@ interface Semester {
   yearString: string;
   subjects: Subject[];
   iconIndex: number;
+  isArchived?: boolean; 
 }
 
 interface SemesterPageProps {
@@ -55,83 +64,74 @@ const semesterIcons = [
 ];
 
 export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: SemesterPageProps) => {
-  const isGuest = localStorage.getItem("isGuest") === "true";
-  const userDataString = localStorage.getItem("userData");
+  const [semesters, setSemesters] = useState<Semester[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isGuest, setIsGuest] = useState(false);
+  const [userData, setUserData] = useState<UserData | null>(null);
   
-  const userData = userDataString && userDataString !== "undefined" ? JSON.parse(userDataString) : {};
-  const storageKey = isGuest ? "unimind-semesters-guest" : `unimind-semesters-${userData.name || "user"}`;
-  const plansKey = isGuest ? "unimind-plans-guest" : `unimind-plans-${userData.name || "user"}`;
-
-  const [semesters, setSemesters] = useState<Semester[]>(() => {
-    const saved = localStorage.getItem(storageKey);
-    if (saved && saved !== "undefined") {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error("Помилка парсингу семестрів:", e);
-        return [];
-      }
-    }
-    return [];
-  });
-
-  const [hasFetched, setHasFetched] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newSemName, setNewSemName] = useState("");
   const [newSemYear, setNewSemYear] = useState("");
 
+  const getStorageKey = (guest: boolean, user: UserData | null) => {
+    return guest ? "unimind-semesters-guest" : `unimind-semesters-${user?.name || "user"}`;
+  };
+
+  // --- 1. ІНІЦІАЛІЗАЦІЯ ---
   useEffect(() => {
-    localStorage.setItem(storageKey, JSON.stringify(semesters));
+    const initData = async () => {
+      setIsLoading(true);
+      const guestStatus = await localforage.getItem("isGuest") === "true";
+      const storedUser = await localforage.getItem<UserData>("userData");
+      
+      setIsGuest(guestStatus);
+      setUserData(storedUser);
 
-    const syncWithServer = async () => {
-      if (!isGuest && userData.id) {
+      const key = getStorageKey(guestStatus, storedUser);
+      const savedSemesters = await localforage.getItem<Semester[]>(key);
+      
+      if (savedSemesters) {
+        setSemesters(savedSemesters);
+      }
+
+      if (!guestStatus && storedUser?.id && (!savedSemesters || savedSemesters.length === 0)) {
         try {
-          const savedPlans = localStorage.getItem(plansKey);
-          const currentPlans = savedPlans ? JSON.parse(savedPlans) : [];
+          const response = await fetch(`${API_URL}/profile/${storedUser.id}`);
+          const dbUser = await response.json();
+          if (response.ok && dbUser.semesters) {
+            setSemesters(dbUser.semesters);
+            await localforage.setItem(key, dbUser.semesters);
+          }
+        } catch (e) { console.error(e); }
+      }
+      setTimeout(() => setIsLoading(false), 150);
+    };
+    initData();
+  }, []);
 
-          const response = await fetch(`${API_URL}/sync/all`, {
+  // --- 2. СИНХРОНІЗАЦІЯ ---
+  useEffect(() => {
+    if (isLoading) return;
+    const syncData = async () => {
+      const key = getStorageKey(isGuest, userData);
+      await localforage.setItem(key, semesters);
+      if (!isGuest && userData?.id) {
+        try {
+          const plansKey = `unimind-plans-${userData.name}`;
+          const currentPlans = await localforage.getItem(plansKey) || [];
+          await fetch(`${API_URL}/sync/all`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              userId: userData.id,
-              semesters: semesters,
-              plans: currentPlans
-            }),
+            body: JSON.stringify({ userId: userData.id, semesters, plans: currentPlans }),
           });
-          
-          if (!response.ok) throw new Error("Server error");
-        } catch (error) {
-          console.error("Фонова синхронізація не вдалася:", error);
-        }
+        } catch (error) { console.error(error); }
       }
     };
-
-    const timeoutId = setTimeout(syncWithServer, 1000);
+    const timeoutId = setTimeout(syncData, 1000);
     return () => clearTimeout(timeoutId);
-  }, [semesters, storageKey, isGuest, userData.id, plansKey]);
+  }, [semesters, isGuest, userData, isLoading]);
 
-  useEffect(() => {
-    const fetchFromDB = async () => {
-      if (isGuest || !userData.id || hasFetched) return;
-
-      try {
-        const response = await fetch(`${API_URL}/profile/${userData.id}`);
-        const dbUser = await response.json();
-        
-        if (response.ok && dbUser.semesters && dbUser.semesters.length > 0) {
-          if (semesters.length === 0) {
-            setSemesters(dbUser.semesters);
-          }
-        }
-        setHasFetched(true); 
-      } catch {
-        console.error("Не вдалося підтягнути дані з бази");
-        setHasFetched(true);
-      }
-    };
-    fetchFromDB();
-  }, [isGuest, userData.id, semesters.length, hasFetched]);
-
+  // --- ЛОГІКА ДОДАВАННЯ ---
   const calculateDefaultData = () => {
     const nextName = `Семестр ${semesters.length + 1}`;
     if (semesters.length === 0) {
@@ -140,12 +140,12 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
       const nextYear = today.getMonth() >= 7 ? `${year}/${year + 1} (Осінній)` : `${year - 1}/${year} (Весняний)`;
       return { nextName, nextYear };
     }
-    const lastSem = semesters[semesters.length - 1];
-    if (!lastSem || !lastSem.yearString) {
-      return { nextName, nextYear: "2026/2027 (Осінній)" };
-    }
+    
+    // Шукаємо останній створений семестр для пропозиції року
+    const lastSem = semesters[0]; 
     const match = lastSem.yearString.match(/(\d{4})\/(\d{4})\s*\((Осінній|Весняний)\)/);
     let nextYear = lastSem.yearString;
+    
     if (match) {
       const startYear = parseInt(match[1], 10);
       const endYear = parseInt(match[2], 10);
@@ -170,18 +170,53 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
       name: newSemName,
       yearString: newSemYear,
       subjects: [], 
-      iconIndex: semesters.length % semesterIcons.length, 
+      iconIndex: Math.floor(Math.random() * semesterIcons.length),
+      isArchived: false,
     };
-    setSemesters([...semesters, newSemester]);
+    // Новий завжди на початок масиву
+    setSemesters([newSemester, ...semesters]); 
     setIsModalOpen(false);
   };
 
+  const handleDeleteSemester = (id: string) => {
+    setSemesters(semesters.filter(s => s.id !== id));
+  };
+
+  // --- ЛОГІКА РОЗПОДІЛУ: Активні попереду, архівні в кінці ---
+  // Ми не змінюємо масив semesters назавжди, ми лише сортуємо його для відображення.
+  // Оскільки ми додаємо нові через [new, ...old], масив вже має хронологічний порядок (від нових до старих).
+  const displaySemesters = [...semesters].sort((a, b) => {
+    if (a.isArchived === b.isArchived) return 0; // зберігаємо оригінальний порядок створення
+    return a.isArchived ? 1 : -1; // архівні (true) переміщуємо в кінець
+  });
+
+  if (isLoading) return <div className="semester-page" style={{ opacity: 0 }} />;
+
   return (
-    <div className="semester-page">
+    <motion.div 
+      className="semester-page"
+      initial={{ opacity: 0 }} 
+      animate={{ opacity: 1 }} 
+      transition={{ duration: 0.3 }}
+    >
       <h2 className="semester-header">Академічний Простір</h2>
       <div className="semesters-grid">
         <AnimatePresence mode="popLayout">
-          {semesters.map((sem, index) => {
+          {/* Кнопка додавання завжди ПЕРША */}
+          <motion.div 
+            key="add-card"
+            className="add-semester-card" 
+            onClick={handleOpenModal} 
+            layout
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+          >
+            <div className="add-sem-btn"><Plus size={28} weight="bold" /></div>
+            <span className="add-sem-text">Додати новий семестр</span>
+          </motion.div>
+
+          {/* Список семестрів: спочатку активні за порядком створення, потім архівні */}
+          {displaySemesters.map((sem) => {
              const subjects = sem.subjects || [];
              const allTasks = subjects.flatMap(s => s.tasks || []);
              const tasksCompleted = allTasks.filter(t => t.score !== null).length;
@@ -197,22 +232,25 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
 
                const subjectCWs = s.tasks.filter(t => t.type === "Курсова робота");
                courseWorkCount += subjectCWs.length;
-               
                subjectCWs.forEach(cw => {
                  weightedSum += (cw.score || 0) * (cw.credits || 0);
                });
              });
 
              const semesterRating = parseFloat((weightedSum / 30).toFixed(2));
-             const totalItemsCount = subjects.length + courseWorkCount;
 
              return (
               <motion.div 
-                key={sem.id} className="semester-card" onClick={() => { setSelectedSemesterId(sem.id); setCurrentScreen("dashboard"); }}
-                initial={{ opacity: 0, scale: 0.8, y: 30 }} animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.5 }} transition={{ duration: 0.4, delay: index * 0.1, ease: "easeOut" }} layout
+                key={sem.id} 
+                className={`semester-card ${sem.isArchived ? "is-archived" : ""}`} 
+                onClick={() => { setSelectedSemesterId(sem.id); setCurrentScreen("dashboard"); }}
+                initial={{ opacity: 0, scale: 0.9, y: 20 }} 
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.5 }} 
+                transition={{ duration: 0.3, ease: "easeOut" }} 
+                layout // Framer Motion автоматично пересуне картку в кінець при архівації
               >
-                <button className="delete-sem-btn" onClick={(e) => { e.stopPropagation(); setSemesters(semesters.filter(s => s.id !== sem.id)); }}>
+                <button className="delete-sem-btn" onClick={(e) => { e.stopPropagation(); handleDeleteSemester(sem.id); }}>
                   <Minus size={16} weight="bold" />
                 </button>
                 <div className="sem-card-top">
@@ -224,32 +262,34 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
                 </div>
                 <div className="sem-stats">
                   <div className="sem-stat-row">
-                    <span className="sem-stat-label"><GraduationCap size={18} /> Семестровий рейтинг </span>
+                    <span className="sem-stat-label"><GraduationCap size={18} /> Рейтинг</span>
                     <span className="sem-stat-value">{semesterRating > 0 ? semesterRating : "—"}</span>
                   </div>
                   <div className="sem-stat-row">
-                    <span className="sem-stat-label"><Books size={18} /> Кількість предметів</span>
-                    <span className="sem-stat-value">{totalItemsCount}</span> 
+                    <span className="sem-stat-label"><Books size={18} /> Предмети</span>
+                    <span className="sem-stat-value">{subjects.length + courseWorkCount}</span> 
                   </div>
                 </div>
                 <div className="sem-progress-section">
-                  <div className="sem-progress-text">{tasksCompleted}/{allTasks.length} завдань завершено</div>
+                  <div className="sem-progress-text">{tasksCompleted}/{allTasks.length} завдання</div>
                   <div className="sem-progress-bar-bg"><div className="sem-progress-fill" style={{ width: `${progress}%` }} /></div>
                 </div>
               </motion.div>
             );
           })}
-          <motion.div className="add-semester-card" onClick={handleOpenModal} layout>
-            <div className="add-sem-btn"><Plus size={28} weight="bold" /></div>
-            <span className="add-sem-text">Додати новий семестр</span>
-          </motion.div>
         </AnimatePresence>
       </div>
 
       <AnimatePresence>
         {isModalOpen && (
-          <div className="sem-modal-overlay">
-            <motion.div className="sem-modal-card" initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}>
+          <div className="sem-modal-overlay" onClick={() => setIsModalOpen(false)}>
+            <motion.div 
+              className="sem-modal-card" 
+              onClick={(e) => e.stopPropagation()}
+              initial={{ scale: 0.9, opacity: 0 }} 
+              animate={{ scale: 1, opacity: 1 }} 
+              exit={{ scale: 0.9, opacity: 0 }}
+            >
               <h2 className="sem-modal-title">Новий семестр</h2>
               <div className="sem-modal-form">
                 <div className="sem-input-group">
@@ -269,6 +309,6 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
           </div>
         )}
       </AnimatePresence>
-    </div>
+    </motion.div>
   );
 };

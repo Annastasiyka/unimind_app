@@ -1,28 +1,33 @@
 import { useState, useEffect, useRef } from "react";
+import localforage from "localforage";
+import { motion } from "framer-motion"; // Додаємо для ефекту появи
 
-type Plan = {
+// --- ТИПИ ТА ІНТЕРФЕЙСИ ---
+interface Plan {
   id: number | string;
   text: string;
   completed: boolean;
   date: string;
   type: string;
   time?: string;
-};
+}
+
+interface UserData {
+  id: number;
+  name: string;
+  email: string;
+}
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 export const CalendarPage = () => {
-  const [isLoggedIn] = useState(() => {
-    const isGuest = localStorage.getItem("isGuest") === "true";
-    const userData = localStorage.getItem("userData");
-    return !isGuest && !!userData;
-  });
-
-  const storageKey = (() => {
-    if (!isLoggedIn) return "unimind-plans-guest";
-    const userData = JSON.parse(localStorage.getItem("userData") || "{}");
-    const name = userData.name || "user";
-    return `unimind-plans-${name}`;
-  })();
-
+  // --- ОСНОВНІ СТАНИ ---
+  const [isLoading, setIsLoading] = useState(true);
+  const [isGuest, setIsGuest] = useState(false);
+  const [userData, setUserData] = useState<UserData | null>(null);
+  const [plans, setPlans] = useState<Plan[]>([]);
+  
+  // Календарні стани
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDayPlans, setSelectedDayPlans] = useState<number | null>(null);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
@@ -30,79 +35,83 @@ export const CalendarPage = () => {
   const [tempYear, setTempYear] = useState(new Date().getFullYear());
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
 
-  const categories = ["Особисте", "Навчання", "Лабораторна", "Робота"];
-  const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, "0"));
-  const minutes = Array.from({ length: 12 }, (_, i) => (i * 5).toString().padStart(2, "0"));
-
-  const [plans, setPlans] = useState<Plan[]>(() => {
-    const saved = localStorage.getItem(storageKey);
-    if (!saved) return [];
-    try {
-      return JSON.parse(saved);
-    } catch (e) {
-      console.error("Помилка парсингу планів:", e);
-      return [];
-    }
-  });
-
+  // Стани для створення/редагування
   const [newPlanText, setNewPlanText] = useState("");
-  const pickerRef = useRef<HTMLDivElement>(null);
-  const viewYear = currentDate.getFullYear();
-  const viewMonth = currentDate.getMonth();
-
   const [isAddingPlan, setIsAddingPlan] = useState(false);
   const [planType, setPlanType] = useState("Особисте");
   const [planTime, setPlanTime] = useState("");
-  const [hasFetched, setHasFetched] = useState(false);
   
   const [editingPlanId, setEditingPlanId] = useState<number | string | null>(null);
   const [editText, setEditText] = useState("");
   const [editType, setEditType] = useState("Особисте");
   const [editTime, setEditTime] = useState("");
 
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const categories = ["Особисте", "Навчання", "Лабораторна", "Робота"];
+  const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, "0"));
+  const minutes = Array.from({ length: 12 }, (_, i) => (i * 5).toString().padStart(2, "0"));
+
+  const viewYear = currentDate.getFullYear();
+  const viewMonth = currentDate.getMonth();
   const dateKey = selectedDayPlans !== null ? `${selectedDayPlans}-${viewMonth}-${viewYear}` : "";
 
+  // --- 1. ІНІЦІАЛІЗАЦІЯ ДАНИХ ПРИ ЗАВАНТАЖЕННІ ---
   useEffect(() => {
-    const fetchPlansFromDB = async () => {
-      const isGuestMode = localStorage.getItem("isGuest") === "true";
-      const userDataString = localStorage.getItem("userData");
-      const userData = userDataString ? JSON.parse(userDataString) : {};
+    const initCalendar = async () => {
+      const guestStatus = await localforage.getItem("isGuest") === "true";
+      const storedUser = await localforage.getItem<UserData>("userData");
+      
+      setIsGuest(guestStatus);
+      setUserData(storedUser);
 
-      if (isGuestMode || !userData.id || hasFetched) return;
+      // Визначаємо ключ для планів
+      const storageKey = guestStatus 
+        ? "unimind-plans-guest" 
+        : `unimind-plans-${storedUser?.name || "user"}`;
 
-      try {
-        const response = await fetch(`http://127.0.0.1:5000/api/profile/${userData.id}`);
-        const dbUser = await response.json();
-        
-        if (response.ok && dbUser.plans && dbUser.plans.length > 0) {
-          if (plans.length === 0) {
-            setPlans(dbUser.plans);
-          }
-        }
-        setHasFetched(true);
-      } catch (error) {
-        console.error("Не вдалося підтягнути плани з бази", error);
-        setHasFetched(true);
+      // Завантажуємо локальні плани
+      const savedPlans = await localforage.getItem<Plan[]>(storageKey);
+      if (savedPlans) {
+        setPlans(savedPlans);
       }
+
+      // Якщо не гість і плани порожні — пробуємо завантажити з сервера
+      if (!guestStatus && storedUser?.id && (!savedPlans || savedPlans.length === 0)) {
+        try {
+          const response = await fetch(`${API_URL}/profile/${storedUser.id}`);
+          const dbData = await response.json();
+          if (response.ok && dbData.plans) {
+            setPlans(dbData.plans);
+            await localforage.setItem(storageKey, dbData.plans);
+          }
+        } catch (error) {
+          console.error("Помилка завантаження планів з сервера:", error);
+        }
+      }
+      // Додаємо невелику затримку для стабільності перед показом
+      setTimeout(() => setIsLoading(false), 100);
     };
 
-    fetchPlansFromDB();
-  }, [hasFetched, plans.length]);
+    initCalendar();
+  }, []);
 
+  // --- 2. СИНХРОНІЗАЦІЯ (Збереження в IndexedDB + Сервер) ---
   useEffect(() => {
-    localStorage.setItem(storageKey, JSON.stringify(plans));
+    if (isLoading) return;
 
-    const syncWithServer = async () => {
-      const isGuestMode = localStorage.getItem("isGuest") === "true";
-      const userDataString = localStorage.getItem("userData");
-      const userData = userDataString ? JSON.parse(userDataString) : {};
+    const syncWithStorage = async () => {
+      const storageKey = isGuest 
+        ? "unimind-plans-guest" 
+        : `unimind-plans-${userData?.name || "user"}`;
+      
+      await localforage.setItem(storageKey, plans);
 
-      if (!isGuestMode && userData.id) {
+      if (!isGuest && userData?.id) {
         try {
-          const semestersKey = `unimind-semesters-${userData.name || "user"}`;
-          const currentSemesters = JSON.parse(localStorage.getItem(semestersKey) || "[]");
+          const semestersKey = `unimind-semesters-${userData.name}`;
+          const currentSemesters = await localforage.getItem(semestersKey) || [];
 
-          await fetch("http://127.0.0.1:5000/api/sync/all", {
+          await fetch(`${API_URL}/sync/all`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -112,15 +121,16 @@ export const CalendarPage = () => {
             }),
           });
         } catch (error) {
-          console.error("Синхронізація календаря не вдалася:", error);
+          console.error("Фонова синхронізація не вдалася:", error);
         }
       }
     };
 
-    const timeoutId = setTimeout(syncWithServer, 1000);
+    const timeoutId = setTimeout(syncWithStorage, 1000);
     return () => clearTimeout(timeoutId);
-  }, [plans, storageKey]);
+  }, [plans, isGuest, userData, isLoading]);
 
+  // Закриття пікера дати при кліку зовні
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (pickerRef.current && !pickerRef.current.contains(event.target as Node)) {
@@ -132,7 +142,7 @@ export const CalendarPage = () => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isPickerOpen]);
 
-
+  // --- ФУНКЦІЇ ОБРОБКИ ПЛАНІВ ---
   const getCategoryClass = (type: string) => {
     switch (type) {
       case "Навчання": return "cat-study";
@@ -176,8 +186,8 @@ export const CalendarPage = () => {
   const saveEdit = (id: number | string) => {
     setPlans(
       plans.map((p) =>
-        p.id === id ? { ...p, text: editText, type: editType, time: editTime } : p,
-      ),
+        p.id === id ? { ...p, text: editText, type: editType, time: editTime } : p
+      )
     );
     setEditingPlanId(null);
   };
@@ -188,6 +198,7 @@ export const CalendarPage = () => {
   const deletePlan = (id: number | string) =>
     setPlans(plans.filter((p) => p.id !== id));
 
+  // --- КАЛЕНДАРНА МАТЕМАТИКА ---
   const monthLabel = new Intl.DateTimeFormat("uk-UA", { month: "long" }).format(currentDate);
   const allMonths = Array.from({ length: 12 }, (_, i) =>
     new Intl.DateTimeFormat("uk-UA", { month: "long" }).format(new Date(2026, i, 1))
@@ -220,17 +231,23 @@ export const CalendarPage = () => {
     );
   };
 
-
+  // Показуємо порожній блок з прозорістю 0 під час завантаження, щоб уникнути стрибків
+  if (isLoading) return <div className="calendar-page" style={{ opacity: 0 }} />;
 
   return (
-    <div className="calendar-page">
+    <motion.div 
+      className="calendar-page"
+      initial={{ opacity: 0 }} 
+      animate={{ opacity: 1 }} 
+      transition={{ duration: 0.3 }}
+    >
       <div className="Calendar-message">
         <p>Твій простір подій</p>
       </div>
 
       <div className="calendar-layout">
         <aside className="calendar-sidebar">
-          {!isLoggedIn && (
+          {isGuest && (
             <div className="card-glass">
               <div className="status-info">
                 <p>
@@ -246,7 +263,6 @@ export const CalendarPage = () => {
           className="calendar-body card-glass"
           style={{ padding: "20px", position: "relative" }}
         >
-          {/* Навігація по місяцях */}
           <div
             style={{
               display: "flex",
@@ -262,14 +278,13 @@ export const CalendarPage = () => {
               className="month"
               onClick={() => setIsPickerOpen(!isPickerOpen)}
             >
-              {monthLabel}
+              {monthLabel} {viewYear}
             </h2>
             <button className="calendar-date" onClick={() => changeMonth(1)}>
               ›
             </button>
           </div>
 
-          {/* Вибір Року та Місяця (Picker) */}
           {isPickerOpen && (
             <div ref={pickerRef} className="card-glass calendar-picker-modal">
               <p className="picker-step-title">
@@ -344,7 +359,6 @@ export const CalendarPage = () => {
             </div>
           )}
 
-          {/* Сітка календаря */}
           <div
             style={{
               display: "grid",
@@ -398,7 +412,6 @@ export const CalendarPage = () => {
         </main>
       </div>
 
-      {/* Модальне вікно планів на обраний день */}
       {selectedDayPlans !== null && (
         <div
           className="modal-overlay"
@@ -439,7 +452,6 @@ export const CalendarPage = () => {
                             gap: "10px",
                           }}
                         >
-                          {/* Вибір часу */}
                           <div
                             className="control-group-interactive"
                             onClick={() =>
@@ -507,7 +519,6 @@ export const CalendarPage = () => {
                               </div>
                             )}
                           </div>
-                          {/* Вибір категорії */}
                           <div
                             className="control-group-interactive"
                             onClick={() =>
@@ -602,7 +613,6 @@ export const CalendarPage = () => {
                   )}
             </div>
 
-            {/* Додавання нового плану */}
             {isAddingPlan && (
               <div className="add-plan-block">
                 <textarea
@@ -734,6 +744,6 @@ export const CalendarPage = () => {
           </div>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 };
