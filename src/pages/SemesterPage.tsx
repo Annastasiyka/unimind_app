@@ -10,7 +10,6 @@ import {
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
-// --- ІНТЕРФЕЙСИ ---
 interface UserData {
   id: number;
   name: string;
@@ -77,7 +76,6 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
     return guest ? "unimind-semesters-guest" : `unimind-semesters-${user?.name || "user"}`;
   };
 
-  // --- 1. ІНІЦІАЛІЗАЦІЯ ---
   useEffect(() => {
     const initData = async () => {
       setIsLoading(true);
@@ -109,7 +107,6 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
     initData();
   }, []);
 
-  // --- 2. СИНХРОНІЗАЦІЯ ---
   useEffect(() => {
     if (isLoading) return;
     const syncData = async () => {
@@ -131,7 +128,6 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
     return () => clearTimeout(timeoutId);
   }, [semesters, isGuest, userData, isLoading]);
 
-  // --- ЛОГІКА ДОДАВАННЯ ---
   const calculateDefaultData = () => {
     const nextName = `Семестр ${semesters.length + 1}`;
     if (semesters.length === 0) {
@@ -141,7 +137,6 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
       return { nextName, nextYear };
     }
     
-    // Шукаємо останній створений семестр для пропозиції року
     const lastSem = semesters[0]; 
     const match = lastSem.yearString.match(/(\d{4})\/(\d{4})\s*\((Осінній|Весняний)\)/);
     let nextYear = lastSem.yearString;
@@ -173,7 +168,6 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
       iconIndex: Math.floor(Math.random() * semesterIcons.length),
       isArchived: false,
     };
-    // Новий завжди на початок масиву
     setSemesters([newSemester, ...semesters]); 
     setIsModalOpen(false);
   };
@@ -182,12 +176,9 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
     setSemesters(semesters.filter(s => s.id !== id));
   };
 
-  // --- ЛОГІКА РОЗПОДІЛУ: Активні попереду, архівні в кінці ---
-  // Ми не змінюємо масив semesters назавжди, ми лише сортуємо його для відображення.
-  // Оскільки ми додаємо нові через [new, ...old], масив вже має хронологічний порядок (від нових до старих).
   const displaySemesters = [...semesters].sort((a, b) => {
-    if (a.isArchived === b.isArchived) return 0; // зберігаємо оригінальний порядок створення
-    return a.isArchived ? 1 : -1; // архівні (true) переміщуємо в кінець
+    if (a.isArchived === b.isArchived) return 0; 
+    return a.isArchived ? 1 : -1; 
   });
 
   if (isLoading) return <div className="semester-page" style={{ opacity: 0 }} />;
@@ -202,7 +193,6 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
       <h2 className="semester-header">Академічний Простір</h2>
       <div className="semesters-grid">
         <AnimatePresence mode="popLayout">
-          {/* Кнопка додавання завжди ПЕРША */}
           <motion.div 
             key="add-card"
             className="add-semester-card" 
@@ -215,7 +205,6 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
             <span className="add-sem-text">Додати новий семестр</span>
           </motion.div>
 
-          {/* Список семестрів: спочатку активні за порядком створення, потім архівні */}
           {displaySemesters.map((sem) => {
              const subjects = sem.subjects || [];
              const allTasks = subjects.flatMap(s => s.tasks || []);
@@ -248,7 +237,7 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.5 }} 
                 transition={{ duration: 0.3, ease: "easeOut" }} 
-                layout // Framer Motion автоматично пересуне картку в кінець при архівації
+                layout 
               >
                 <button className="delete-sem-btn" onClick={(e) => { e.stopPropagation(); handleDeleteSemester(sem.id); }}>
                   <Minus size={16} weight="bold" />

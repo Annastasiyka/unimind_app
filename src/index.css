@@ -4544,9 +4544,9 @@ input[type="number"] {
   justify-content: space-between;
   align-items: center;
   padding: 18px 30px;
-  background: linear-gradient(90deg, rgba(150, 117, 227, 0.8), rgba(92, 75, 117, 0.9));
+  background:  rgba(172, 142, 242, 0.6);
   border-radius: 0 0 24px 24px;
-  color: white;
+  color: var(--accent-color);
 }
 
 .ai-opt-left {

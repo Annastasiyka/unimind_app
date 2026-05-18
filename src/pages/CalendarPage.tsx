@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import localforage from "localforage";
-import { motion } from "framer-motion"; // Додаємо для ефекту появи
+import { motion } from "framer-motion"; 
 
-// --- ТИПИ ТА ІНТЕРФЕЙСИ ---
 interface Plan {
   id: number | string;
   text: string;
@@ -21,13 +20,11 @@ interface UserData {
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 export const CalendarPage = () => {
-  // --- ОСНОВНІ СТАНИ ---
   const [isLoading, setIsLoading] = useState(true);
   const [isGuest, setIsGuest] = useState(false);
   const [userData, setUserData] = useState<UserData | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
   
-  // Календарні стани
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDayPlans, setSelectedDayPlans] = useState<number | null>(null);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
@@ -35,7 +32,6 @@ export const CalendarPage = () => {
   const [tempYear, setTempYear] = useState(new Date().getFullYear());
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
 
-  // Стани для створення/редагування
   const [newPlanText, setNewPlanText] = useState("");
   const [isAddingPlan, setIsAddingPlan] = useState(false);
   const [planType, setPlanType] = useState("Особисте");
@@ -55,7 +51,6 @@ export const CalendarPage = () => {
   const viewMonth = currentDate.getMonth();
   const dateKey = selectedDayPlans !== null ? `${selectedDayPlans}-${viewMonth}-${viewYear}` : "";
 
-  // --- 1. ІНІЦІАЛІЗАЦІЯ ДАНИХ ПРИ ЗАВАНТАЖЕННІ ---
   useEffect(() => {
     const initCalendar = async () => {
       const guestStatus = await localforage.getItem("isGuest") === "true";
@@ -64,18 +59,15 @@ export const CalendarPage = () => {
       setIsGuest(guestStatus);
       setUserData(storedUser);
 
-      // Визначаємо ключ для планів
       const storageKey = guestStatus 
         ? "unimind-plans-guest" 
         : `unimind-plans-${storedUser?.name || "user"}`;
 
-      // Завантажуємо локальні плани
       const savedPlans = await localforage.getItem<Plan[]>(storageKey);
       if (savedPlans) {
         setPlans(savedPlans);
       }
 
-      // Якщо не гість і плани порожні — пробуємо завантажити з сервера
       if (!guestStatus && storedUser?.id && (!savedPlans || savedPlans.length === 0)) {
         try {
           const response = await fetch(`${API_URL}/profile/${storedUser.id}`);
@@ -88,14 +80,12 @@ export const CalendarPage = () => {
           console.error("Помилка завантаження планів з сервера:", error);
         }
       }
-      // Додаємо невелику затримку для стабільності перед показом
       setTimeout(() => setIsLoading(false), 100);
     };
 
     initCalendar();
   }, []);
 
-  // --- 2. СИНХРОНІЗАЦІЯ (Збереження в IndexedDB + Сервер) ---
   useEffect(() => {
     if (isLoading) return;
 
@@ -130,7 +120,6 @@ export const CalendarPage = () => {
     return () => clearTimeout(timeoutId);
   }, [plans, isGuest, userData, isLoading]);
 
-  // Закриття пікера дати при кліку зовні
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (pickerRef.current && !pickerRef.current.contains(event.target as Node)) {
@@ -142,7 +131,6 @@ export const CalendarPage = () => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isPickerOpen]);
 
-  // --- ФУНКЦІЇ ОБРОБКИ ПЛАНІВ ---
   const getCategoryClass = (type: string) => {
     switch (type) {
       case "Навчання": return "cat-study";
@@ -198,7 +186,6 @@ export const CalendarPage = () => {
   const deletePlan = (id: number | string) =>
     setPlans(plans.filter((p) => p.id !== id));
 
-  // --- КАЛЕНДАРНА МАТЕМАТИКА ---
   const monthLabel = new Intl.DateTimeFormat("uk-UA", { month: "long" }).format(currentDate);
   const allMonths = Array.from({ length: 12 }, (_, i) =>
     new Intl.DateTimeFormat("uk-UA", { month: "long" }).format(new Date(2026, i, 1))
@@ -231,7 +218,6 @@ export const CalendarPage = () => {
     );
   };
 
-  // Показуємо порожній блок з прозорістю 0 під час завантаження, щоб уникнути стрибків
   if (isLoading) return <div className="calendar-page" style={{ opacity: 0 }} />;
 
   return (

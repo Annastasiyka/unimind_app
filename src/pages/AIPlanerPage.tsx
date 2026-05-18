@@ -11,7 +11,8 @@ import {
   BookOpenText,
   Flask,
   Briefcase,
-  User
+  User,
+  Coffee
 } from "@phosphor-icons/react";
 
 const monthNames = ["січня", "лютого", "березня", "квітня", "травня", "червня", "липня", "серпня", "вересня", "жовтня", "листопада", "грудня"];
@@ -42,7 +43,7 @@ interface PlannerTask {
   title: string;
   timeStart: string;
   timeEnd: string;
-  category: "study" | "lab" | "work" | "personal";
+  category: "study" | "lab" | "work" | "personal" | "wellness";
   dateKey: string; 
 }
 
@@ -51,7 +52,6 @@ interface WorkSchedule {
   days: Record<string, boolean>;
 }
 
-// Використовуємо змінну середовища для запитів до бекенду
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 export const AIPlanerPage = () => {
@@ -61,9 +61,7 @@ export const AIPlanerPage = () => {
   const [allPlans, setAllPlans] = useState<Plan[]>([]);
   const [workSchedule, setWorkSchedule] = useState<WorkSchedule | null>(null);
   const [userData, setUserData] = useState<UserData | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { id: `ai-init-${Date.now()}`, role: "ai", text: "Привіт! Я твій AI-ментор UniMind. Я можу проаналізувати твої дедлайни та скласти ідеальний стратегічний план. З чого почнемо? ✨" }
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isAiLoading, setIsAiLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -75,36 +73,29 @@ export const AIPlanerPage = () => {
       const isGuest = (await localforage.getItem("isGuest")) === "true";
       const nameKey = isGuest ? "Гість" : (storedUser?.name || "user");
 
-      let fetchedWorkSchedule: WorkSchedule | null = null;
-      let fetchedPlans: Plan[] = [];
-
       if (!isGuest && storedUser?.id) {
         try {
           const response = await fetch(`${API_URL}/profile/${storedUser.id}`);
           const dbData = await response.json();
           if (response.ok && dbData) {
-            if (dbData.workSchedule) {
-              fetchedWorkSchedule = dbData.workSchedule;
-              setWorkSchedule(dbData.workSchedule);
-            }
-            if (dbData.plans) {
-              fetchedPlans = dbData.plans;
-              setAllPlans(dbData.plans);
+            if (dbData.workSchedule) setWorkSchedule(dbData.workSchedule);
+            if (dbData.plans) setAllPlans(dbData.plans);
+            if (dbData.chatHistory && dbData.chatHistory.length > 0) {
+              setMessages(dbData.chatHistory);
+            } else {
+              setMessages([{ 
+                id: `ai-init-${Date.now()}`, 
+                role: "ai", 
+                text: "Привіт! Я твій ШІ-ментор UniMind. Твої плани завантажені і готові до оптимізації. Просто скажи мені, що хочеш змінити або додати, і я допоможу!" 
+              }]);
             }
           }
-        } catch { console.log("Бекенд на Render недоступний, перехід в офлайн"); }
+        } catch { console.log("Бекенд недоступний, перехід в офлайн"); }
       }
 
-      if (!fetchedWorkSchedule) {
-        const localTimes = await localforage.getItem<Record<string, string>>(`unimind-work-times-${nameKey}`);
-        const localDays = await localforage.getItem<Record<string, boolean>>(`unimind-active-days-${nameKey}`);
-        if (localTimes && localDays) setWorkSchedule({ times: localTimes, days: localDays });
-      }
-      
-      if (fetchedPlans.length === 0) {
-        const plansKey = isGuest ? "unimind-plans-guest" : `unimind-plans-${nameKey}`;
-        const localPlans = await localforage.getItem<Plan[]>(plansKey) || [];
-        setAllPlans(localPlans);
+      if (allPlans.length === 0) {
+        const localPlans = await localforage.getItem<Plan[]>(isGuest ? "unimind-plans-guest" : `unimind-plans-${nameKey}`) || [];
+        if (localPlans.length > 0) setAllPlans(localPlans);
       }
     };
     initPlanner();
@@ -116,7 +107,8 @@ export const AIPlanerPage = () => {
     updateTime();
     const interval = setInterval(updateTime, 60000);
     return () => clearInterval(interval);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); 
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
@@ -144,7 +136,7 @@ export const AIPlanerPage = () => {
       } else {
         let min = 24, max = 0, found = false;
         ukDaysMap.forEach(d => {
-          if (workSchedule.days[d]) {
+          if (workSchedule?.days[d]) {
             found = true;
             const f = parseInt((workSchedule.times[`${d}-from`] || "09:00").split(":")[0]);
             const t = parseInt((workSchedule.times[`${d}-to`] || "17:00").split(":")[0]);
@@ -158,17 +150,19 @@ export const AIPlanerPage = () => {
   }, [workSchedule, viewMode, baseDate]);
 
   const plannerTasks: PlannerTask[] = useMemo(() => {
-    const mapCat = (t: string): "study" | "lab" | "work" | "personal" => {
+    const mapCat = (t: string): "study" | "lab" | "work" | "personal" | "wellness" => {
       if (t === "Навчання") return "study";
       if (t === "Лабораторна") return "lab";
       if (t === "Робота") return "work";
+      if (t === "Wellness" || t === "Їжа" || t === "Прийом їжі") return "wellness";
       return "personal";
     };
+
     return allPlans
       .filter(p => p.id && p.time)
       .map(p => {
         const [h, m] = (p.time as string).split(':').map(Number);
-        const dur = p.type === "Навчання" ? 90 : 60;
+        const dur = (p.type === "Навчання" || p.type === "Лабораторна") ? 90 : 60;
         const total = h * 60 + m + dur;
         return {
           id: String(p.id),
@@ -184,7 +178,7 @@ export const AIPlanerPage = () => {
   const getTaskStyle = (timeStart: string, timeEnd: string, isDay: boolean) => {
     const [startH, startM] = timeStart.split(':').map(Number);
     const [endH, endM] = timeEnd.split(':').map(Number);
-    const gridStartH = parseInt(hoursGrid[0].split(":")[0]);
+    const gridStartH = parseInt(hoursGrid[0]?.split(":")[0] || "0");
     const topPx = (startH - gridStartH) * 60 + startM;
     const heightPx = (endH * 60 + endM) - (startH * 60 + startM);
     
@@ -204,6 +198,7 @@ export const AIPlanerPage = () => {
       case "study": return { icon: <BookOpenText weight="fill" />, colorClass: "cat-study" };
       case "lab": return { icon: <Flask weight="fill" />, colorClass: "cat-lab" };
       case "work": return { icon: <Briefcase weight="fill" />, colorClass: "cat-work" };
+      case "wellness": return { icon: <Coffee weight="fill" />, colorClass: "cat-wellness" };
       default: return { icon: <User weight="fill" />, colorClass: "cat-personal" };
     }
   };
@@ -217,59 +212,47 @@ export const AIPlanerPage = () => {
 
   const handleOptionClick = (option: string) => {
     setInputValue(option);
-    setTimeout(() => {
-      const sendBtn = document.getElementById('ai-send-trigger');
-      sendBtn?.click();
-    }, 100);
+    setTimeout(() => document.getElementById('ai-send-trigger')?.click(), 100);
   };
 
   const handleSendMessage = async (customText?: string) => {
     const messageText = customText || inputValue;
     if (!messageText.trim() || isAiLoading) return;
     
-    const userMsgId = `user-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
-    const userMsg: ChatMessage = { id: userMsgId, role: "user", text: messageText };
-    
-    setMessages(prev => [...prev, userMsg]);
+    const userMsgId = `user-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    setMessages(prev => [...prev, { id: userMsgId, role: "user", text: messageText }]);
     setInputValue("");
     setIsAiLoading(true);
+
+    const now = new Date();
+    const realTime = now.toLocaleTimeString("uk-UA", { hour: '2-digit', minute: '2-digit' });
+    const realDate = `${now.getDate()}-${now.getMonth() + 1}-${now.getFullYear()}`;
 
     try {
       const res = await fetch(`${API_URL}/ai/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          message: userMsg.text, 
-          userId: userData?.id, 
-          workSchedule 
-        })
+        body: JSON.stringify({ message: messageText, userId: userData?.id, workSchedule, realTime, realDate })
       });
 
       if (!res.ok) throw new Error("Server error");
       const data = await res.json();
       
       setMessages(prev => [...prev, { 
-        id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`, 
-        role: "ai", 
-        text: data.reply,
-        options: data.options 
+        id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`, 
+        role: "ai", text: data.reply, options: data.options 
       }]);
 
-      if (data.newPlans && data.newPlans.length > 0) {
-        setAllPlans(prev => [...prev, ...data.newPlans]);
-      } else if (data.newPlan) {
-        setAllPlans(prev => [...prev, data.newPlan]);
-      }
-
+      if (data.newPlans) setAllPlans(prev => [...prev, ...data.newPlans]);
     } catch {
-      setMessages(prev => [...prev, { 
-        id: `err-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`, 
-        role: "ai", 
-        text: "Вибач, стався збій зв'язку. Перевір, чи задеплоєно оновлений бекенд на Render! 🔌" 
-      }]);
+      setMessages(prev => [...prev, { id: `err-${Date.now()}`, role: "ai", text: "🔌 Помилка зв'язку. Перевір Render!" }]);
     } finally {
       setIsAiLoading(false);
     }
+  };
+
+  const handleOptimizePlan = () => {
+    handleSendMessage("Оптимізуй мій сьогоднішній графік: признач час справам без часу та заплануй прийоми їжі.");
   };
 
   const navText = useMemo(() => {
@@ -277,9 +260,6 @@ export const AIPlanerPage = () => {
       return { main: `${baseDate.getDate()} ${monthNames[baseDate.getMonth()]} ${baseDate.getFullYear()}`, sub: dayNamesFull[baseDate.getDay()] };
     } else {
       const start = currentWeekDays[0], end = currentWeekDays[6];
-      if (start.getMonth() === end.getMonth()) {
-        return { main: `${start.getDate()} ${monthNames[start.getMonth()]} – ${end.getDate()} ${monthNames[end.getMonth()]}`, sub: "7 днів" };
-      }
       return { main: `${start.getDate()} ${monthNames[start.getMonth()].slice(0,3)} – ${end.getDate()} ${monthNames[end.getMonth()].slice(0,3)}`, sub: "7 днів" };
     }
   }, [baseDate, viewMode, currentWeekDays]);
@@ -291,63 +271,11 @@ export const AIPlanerPage = () => {
         .cat-lab { background: rgba(162, 161, 255, 0.85) !important; box-shadow: inset 4px 0 0 0 #7d67ff; }
         .cat-work { background: rgba(220, 161, 255, 0.85) !important; box-shadow: inset 4px 0 0 0 #b867ff; }
         .cat-personal { background: rgba(161, 255, 213, 0.85) !important; box-shadow: inset 4px 0 0 0 #2cb464; }
-
-        .planner-task-card {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          text-align: center;
-          transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-          overflow: hidden;
-          cursor: pointer;
-        }
-
-        .planner-task-card:hover {
-          left: -15px !important; 
-          right: -15px !important;
-          height: auto !important;
-          min-height: fit-content;
-          z-index: 1000 !important;
-          padding: 10px !important;
-          box-shadow: 0 10px 30px rgba(0,0,0,0.15);
-        }
-
-        .day-task-card { transition: transform 0.4s ease; }
-        .day-task-card:hover { transform: translateX(15px); z-index: 50 !important; }
-
-        .ai-options-container {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 10px;
-          margin-top: 14px;
-        }
-
-        .ai-option-btn {
-          background: rgba(255, 255, 255, 0.2);
-          backdrop-filter: blur(8px);
-          border: 1px solid rgba(150, 117, 227, 0.3);
-          color: #4a3e75;
-          padding: 8px 16px;
-          border-radius: 20px;
-          font-size: 13px;
-          font-weight: 700;
-          cursor: pointer;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
-        }
-
-        .ai-option-btn:hover {
-          background: #9675e3;
-          color: white;
-          transform: translateY(-2px);
-          box-shadow: 0 6px 15px rgba(150, 117, 227, 0.3);
-          border-color: transparent;
-        }
-
-        .ai-option-btn:active {
-          transform: scale(0.95);
-        }
+        .cat-wellness { background: rgba(255, 212, 161, 0.85) !important; box-shadow: inset 4px 0 0 0 #ff9900; }
+        .planner-task-card { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; transition: all 0.4s; overflow: hidden; cursor: pointer; border-radius: 12px; }
+        .planner-task-card:hover { left: -10px !important; right: -10px !important; z-index: 1000 !important; box-shadow: 0 10px 30px rgba(0,0,0,0.15); }
+        .day-task-card:hover { transform: translateX(10px); }
+        .current-hour-highlight { background: #9675e3; color: white; padding: 4px 8px; borderRadius: 12px; font-weight: bold; }
       `}</style>
 
       <motion.div className="planner-main" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
@@ -375,90 +303,64 @@ export const AIPlanerPage = () => {
         <div className="planner-grid-area">
           <AnimatePresence mode="wait">
             {viewMode === "week" ? (
-              <motion.div key="week" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-                <div className="scrollable-area" style={{ flex: 1, overflowY: 'auto', position: 'relative' }}>
-                  <div style={{ position: 'sticky', top: 0, zIndex: 40, display: 'flex', paddingLeft: '55px', paddingBottom: '3px', paddingTop: '5px', background: 'transparent' }}>
-                    {currentWeekDays.map((d, i) => {
-                      const isToday = d.toDateString() === new Date().toDateString();
+              <motion.div key="week" className="scrollable-area" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={{ height: '100%', overflowY: 'auto' }}>
+                <div style={{ position: 'sticky', top: 0, zIndex: 40, display: 'flex', paddingLeft: '55px', background: 'rgba(248, 246, 255, 0.9)', backdropFilter: 'blur(5px)' }}>
+                  {currentWeekDays.map((d, i) => (
+                    <div key={i} style={{ flex: 1, textAlign: 'center', padding: '10px 0', margin: '0 2px', background: d.toDateString() === new Date().toDateString() ? '#885fe7ba' : 'rgba(150, 117, 227, 0.1)', borderRadius: '10px' }}>
+                      <span style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: d.toDateString() === new Date().toDateString() ? '#fff' : '#4a3e75' }}>{dayNamesShort[d.getDay()]}</span>
+                      <span style={{ fontSize: '11px', color: d.toDateString() === new Date().toDateString() ? '#fff' : '#4a3e75' }}>{d.getDate()}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ position: 'relative' }}>
+                  {hoursGrid.map((hour) => (
+                    <div key={hour} style={{ height: '60px', display: 'flex', borderTop: '1px solid rgba(150, 117, 227, 0.1)' }}>
+                      <div style={{ width: '55px', textAlign: 'right', paddingRight: '10px', fontSize: '12px', color: '#4a3e75', opacity: 0.6 }}>{hour}</div>
+                      <div style={{ flex: 1, display: 'flex' }}>
+                         {currentWeekDays.map((_, i) => <div key={i} style={{ flex: 1, borderLeft: '1px solid rgba(150, 117, 227, 0.05)' }}></div>)}
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{ position: 'absolute', top: 0, left: '55px', right: 0, bottom: 0, display: 'flex', pointerEvents: 'none' }}>
+                    {currentWeekDays.map((dayObj, i) => {
+                      const dateStr = `${dayObj.getDate()}-${dayObj.getMonth() + 1}-${dayObj.getFullYear()}`;
                       return (
-                        <div key={i} style={{ 
-                          flex: 1, textAlign: 'center', padding: '10px 0', margin: '0 4px',
-                          background: isToday ? '#885fe7ba' : 'rgba(150, 117, 227, 0.2)', 
-                          borderRadius: '12px', border: isToday ? '1px solid transparent' : '1px solid rgba(74, 62, 117, 0.2)',
-                          boxShadow: isToday ? '0 4px 12px rgba(123, 90, 184, 0.3)' : 'none',
-                          transition: 'all 0.3s ease'
-                        }}>
-                          <span style={{ display: 'block', fontSize: '15px', fontWeight: 800, color: isToday ? '#fff' : '#4a3e75' }}>{dayNamesShort[d.getDay()]}</span>
-                          <span style={{ fontSize: '12px', fontWeight: 500, color: isToday ? 'rgba(255,255,255,0.8)' : 'rgba(74, 62, 117, 0.6)' }}>{d.getDate()} {monthNames[d.getMonth()].slice(0, 3)}</span>
+                        <div key={i} style={{ flex: 1, position: 'relative' }}>
+                          {plannerTasks.filter(t => t.dateKey === dateStr).map(task => (
+                            <div key={task.id} className={`${getCategoryInfo(task.category).colorClass} planner-task-card`} style={getTaskStyle(task.timeStart, task.timeEnd, false)}>
+                              <span style={{ fontSize: '10px', fontWeight: 800, color: '#4a3e75' }}>{task.title}</span>
+                            </div>
+                          ))}
                         </div>
                       );
                     })}
                   </div>
-
-                  <div style={{ position: 'relative', paddingTop: '10px' }}>
-                    {hoursGrid.map((hour) => (
-                      <div key={hour} style={{ height: '60px', boxSizing: 'border-box', display: 'flex' }}>
-                        <div style={{ width: '55px', textAlign: 'right', paddingRight: '12px', transform: 'translateY(-9px)', fontSize: '13px', color: '#4a3e75', opacity: 0.6, fontWeight: 500 }}>{hour}</div>
-                        <div style={{ flex: 1, display: 'flex', borderTop: '1px solid rgba(255,255,255,0.3)' }}>
-                          {currentWeekDays.map((_, i) => (<div key={i} style={{ flex: 1, borderLeft: '1px solid rgba(255,255,255,0.3)' }}></div>))}
-                        </div>
-                      </div>
-                    ))}
-
-                    <div style={{ position: 'absolute', top: '10px', left: '55px', right: 0, bottom: 0, display: 'flex', pointerEvents: 'none' }}>
-                      {currentWeekDays.map((dayObj, i) => {
-                        // Формат дати без нулів для синхронізації
-                        const dateStr = `${dayObj.getDate()}-${dayObj.getMonth() + 1}-${dayObj.getFullYear()}`;
-                        const tasksForDay = plannerTasks.filter(t => t.dateKey === dateStr);
-                        return (
-                          <div key={i} style={{ flex: 1, position: 'relative', height: '100%' }}>
-                            {tasksForDay.map(task => (
-                              <div key={task.id} className={`${getCategoryInfo(task.category).colorClass} planner-task-card`} style={getTaskStyle(task.timeStart, task.timeEnd, false)}>
-                                <div style={{ opacity: 0.8, color: '#4a3e75' }}>{getCategoryInfo(task.category).icon}</div>
-                                <div className="task-title-container">
-                                  <span style={{ fontSize: '11px', fontWeight: 800, color: '#4a3e75', wordBreak: 'break-word' }}>{task.title}</span>
-                                </div>
-                                <div className="task-detailed-time">{task.timeStart} — {task.timeEnd}</div>
-                              </div>
-                            ))}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
                 </div>
               </motion.div>
             ) : (
-              <motion.div key="day" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                <div className="scrollable-area" style={{ flex: 1, overflowY: 'auto', position: 'relative', paddingTop: '15px' }}>
-                  {hoursGrid.map((hour) => {
-                    const isNow = hour === currentHour && baseDate.toDateString() === new Date().toDateString(); 
-                    const dayName = ukDaysMap[baseDate.getDay()];
-                    const isNonWork = workSchedule && (!workSchedule.days[dayName] || hour < (workSchedule.times[`${dayName}-from`] || "00:00") || hour > (workSchedule.times[`${dayName}-to`] || "23:59"));
-                    return (
-                      <div key={hour} className={isNonWork ? 'out-of-work' : ''} style={{ height: '60px', display: 'flex' }}>
-                        <div style={{ width: '55px', textAlign: 'right', paddingRight: '12px', transform: 'translateY(-9px)', fontSize: '13px', color: '#4a3e75', opacity: 0.6, fontWeight: 500 }}>
-                          {isNow ? <span style={{ background: '#9675e3', color: 'white', padding: '4px 8px', borderRadius: '12px', fontWeight: 'bold' }}>{hour}</span> : hour}
-                        </div>
-                        <div style={{ flex: 1, borderTop: '1px solid rgba(255,255,255,0.3)' }}></div>
-                      </div>
-                    );
-                  })}
-                  <div style={{ position: 'absolute', top: '15px', left: '55px', right: 0, bottom: 0, pointerEvents: 'none' }}>
-                    {/* Формат дати без нулів для синхронізації */}
-                    {plannerTasks.filter(t => t.dateKey === `${baseDate.getDate()}-${baseDate.getMonth() + 1}-${baseDate.getFullYear()}`).map(task => (
-                      <div key={task.id} className={`${getCategoryInfo(task.category).colorClass} day-task-card`} 
-                           style={{ ...getTaskStyle(task.timeStart, task.timeEnd, true), display: 'flex', alignItems: 'center', padding: '0 30px', borderRadius: '12px', pointerEvents: 'auto' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '20px', width: '100%' }}>
-                          <div style={{ opacity: 0.8, color: '#4a3e75', fontSize: '22px' }}>{getCategoryInfo(task.category).icon}</div>
-                          <div style={{ display: 'flex', flexDirection: 'column' }}>
-                            <span style={{ fontWeight: 800, fontSize: '16px', color: '#4a3e75' }}>{task.title}</span>
-                            <span style={{ fontSize: '13px', opacity: 0.7, color: '#4a3e75', fontWeight: 600 }}>{task.timeStart} - {task.timeEnd}</span>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+              <motion.div key="day" className="scrollable-area" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={{ height: '100%', overflowY: 'auto', position: 'relative', paddingTop: '10px' }}>
+                {hoursGrid.map((hour) => (
+                  <div key={hour} style={{ height: '60px', display: 'flex', borderTop: '1px solid rgba(150, 117, 227, 0.1)' }}>
+                    <div style={{ width: '55px', textAlign: 'right', paddingRight: '15px', fontSize: '13px', color: '#4a3e75' }}>
+                      {/* ВИКОРИСТАННЯ currentHour ДЛЯ ПІДСВІТКИ */}
+                      {hour === currentHour && baseDate.toDateString() === new Date().toDateString() 
+                        ? <span className="current-hour-highlight">{hour}</span> 
+                        : hour}
+                    </div>
+                    <div style={{ flex: 1 }}></div>
                   </div>
+                ))}
+                <div style={{ position: 'absolute', top: '10px', left: '55px', right: 0, bottom: 0, pointerEvents: 'none' }}>
+                  {plannerTasks.filter(t => t.dateKey === `${baseDate.getDate()}-${baseDate.getMonth() + 1}-${baseDate.getFullYear()}`).map(task => (
+                    <div key={task.id} className={`${getCategoryInfo(task.category).colorClass} day-task-card planner-task-card`} 
+                         style={{ ...getTaskStyle(task.timeStart, task.timeEnd, true), display: 'flex', alignItems: 'center', padding: '0 20px', pointerEvents: 'auto' }}>
+                      <div style={{ fontSize: '20px', marginRight: '15px' }}>{getCategoryInfo(task.category).icon}</div>
+                      <div style={{ textAlign: 'left' }}>
+                        <div style={{ fontWeight: 800, fontSize: '15px', color: '#4a3e75' }}>{task.title}</div>
+                        <div style={{ fontSize: '12px', opacity: 0.7 }}>{task.timeStart} - {task.timeEnd}</div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </motion.div>
             )}
@@ -468,53 +370,42 @@ export const AIPlanerPage = () => {
         <div className="ai-optimization-bar">
           <div className="ai-opt-left">
             <Sparkle size={28} weight="fill" color="#c1f9ff" />
-            <div><h4>AI-Оптимізація</h4><p>План збалансований. Твій розклад виглядає продуктивним.</p></div>
+            <div><h4>ШІ-Оптимізація</h4><p>Бажаєш, щоб я розставив завдання без часу та прийоми їжі?</p></div>
           </div>
-          <button className="details-btn">Детальніше &gt;</button>
+          <button 
+            className="details-btn" 
+            onClick={handleOptimizePlan} 
+            disabled={isAiLoading}
+            style={{ background: '#e4dbfa63', color: 'var(--accent-color)', border: '1px solid rgba(97, 51, 202, 0.3)', boxShadow: '0 4px 10px rgba(0, 0, 0, 0.1)', padding: '10px 20px', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}
+          >
+            {isAiLoading ? "Думаю..." : "Оптимізувати план ✨"}
+          </button>
         </div>
       </motion.div>
 
-      <motion.div className="planner-sidebar" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.4, delay: 0.1 }}>
-        <div className="sidebar-header"><h3>AI Асистент</h3><Sparkle size={24} weight="fill" color="#9675e3" className="spin-slow" /></div>
+      <motion.div className="planner-sidebar" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+        <div className="sidebar-header"><h3>ШІ Асистент</h3><Sparkle size={24} weight="fill" color="#9675e3" className="spin-slow" /></div>
         <div className="sidebar-chat scrollable-area">
           <AnimatePresence>
             {messages.map((msg) => (
               <motion.div key={msg.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={msg.role === "ai" ? "ai-message-card" : "user-message-card"}>
-                {msg.role === "ai" ? (
-                  <>
-                    <div className="ai-message-badge"><Sparkle size={14} weight="fill" /><span>UniMind AI</span></div>
-                    <p className="ai-main-text" style={{ whiteSpace: "pre-wrap", margin: 0 }}>{msg.text}</p>
-                    
-                    {msg.options && msg.options.length > 0 && (
-                      <div className="ai-options-container">
-                        {msg.options.map((opt, idx) => (
-                          <button key={idx} className="ai-option-btn" onClick={() => handleOptionClick(opt)}>
-                            {opt}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <p className="user-text" style={{ margin: 0 }}>{msg.text}</p>
+                {msg.role === "ai" && <div className="ai-message-badge"><Sparkle size={14} weight="fill" /><span>UniMind AI</span></div>}
+                <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{msg.text}</p>
+                {msg.options && (
+                  <div className="ai-options-container" style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {msg.options.map((opt, i) => <button key={i} className="ai-option-btn" onClick={() => handleOptionClick(opt)}>{opt}</button>)}
+                  </div>
                 )}
               </motion.div>
             ))}
-            {isAiLoading && (<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="ai-typing"><CircleNotch size={24} color="#9675e3" className="spin-fast" /><span>Аналізую запит...</span></motion.div>)}
+            {isAiLoading && (<div className="ai-typing"><CircleNotch size={20} className="spin-fast" /><span>Аналізую...</span></div>)}
             <div ref={chatEndRef} />
           </AnimatePresence>
         </div>
         <div className="sidebar-input-area">
           <div className="input-box">
-            <input 
-              type="text" 
-              placeholder="Скажи, що змінити..." 
-              value={inputValue} 
-              onChange={(e) => setInputValue(e.target.value)} 
-              onKeyDown={e => e.key === "Enter" && handleSendMessage()} 
-              disabled={isAiLoading} 
-            />
-            <button id="ai-send-trigger" className="send-btn" onClick={() => handleSendMessage()} disabled={isAiLoading || !inputValue.trim()}><PaperPlaneRight size={22} weight="fill" /></button>
+            <input type="text" placeholder="Запитай про обід або плани..." value={inputValue} onChange={(e) => setInputValue(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSendMessage()} />
+            <button id="ai-send-trigger" className="send-btn" onClick={() => handleSendMessage()} disabled={isAiLoading}><PaperPlaneRight size={22} weight="fill" /></button>
           </div>
         </div>
       </motion.div>

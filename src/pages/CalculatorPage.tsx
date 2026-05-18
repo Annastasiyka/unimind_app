@@ -12,7 +12,6 @@ import {
   FilePlus,
 } from "@phosphor-icons/react";
 
-// --- ІНТЕРФЕЙСИ ---
 interface UserData {
   id: number;
   name: string;
@@ -57,7 +56,6 @@ interface Profile {
   bonus: number | ""; 
 }
 
-// --- ДОПОМІЖНІ ФУНКЦІЇ ---
 const mapSemesterToSimulated = (
   sem: Semester | undefined,
   clearGrades = false,
@@ -116,7 +114,6 @@ const syncSubjects = (
 };
 
 export const CalculatorPage = () => {
-  // --- СТАНИ (STATES) ---
   const [isLoading, setIsLoading] = useState(true);
   const [isGuest, setIsGuest] = useState(false);
   const [userData, setUserData] = useState<UserData | null>(null);
@@ -130,7 +127,6 @@ export const CalculatorPage = () => {
   const [isSemDropdownOpen, setIsSemDropdownOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
-  // --- 1. ІНІЦІАЛІЗАЦІЯ ---
   useEffect(() => {
     const initCalc = async () => {
       setIsLoading(true);
@@ -149,7 +145,6 @@ export const CalculatorPage = () => {
 
       setAllSemesters(savedSemesters);
 
-      // ВИПРАВЛЕННЯ: Тепер автоматично беремо перший семестр у списку (індекс 0), бо він найновіший
       const initialSemId = savedSemesters.length > 0 ? savedSemesters[0].id : "";
       
       setSelectedSemId(initialSemId);
@@ -175,7 +170,6 @@ export const CalculatorPage = () => {
     initCalc();
   }, []);
 
-  // --- 2. ЗБЕРЕЖЕННЯ ---
   useEffect(() => {
     if (isLoading) return;
     const saveData = async () => {
@@ -188,7 +182,6 @@ export const CalculatorPage = () => {
     saveData();
   }, [profiles, selectedSemId, isGuest, userData, isLoading]);
 
-  // --- 3. ОБЧИСЛЕННЯ ---
   const activeProfile = useMemo(() => {
     return profiles.find((p) => p.id === activeProfileId) || profiles[0] || { subjects: [], bonus: 0 };
   }, [profiles, activeProfileId]);
@@ -210,7 +203,6 @@ export const CalculatorPage = () => {
     return activeProfile?.subjects?.reduce((sum, s) => sum + s.credits, 0) || 0;
   }, [activeProfile]);
 
-  // --- 4. ОБРОБНИКИ ПОДІЙ ---
   const handleSemesterChange = (id: string) => {
     setSelectedSemId(id);
     const newSem = allSemesters.find((s) => s.id === id);
@@ -298,7 +290,6 @@ export const CalculatorPage = () => {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // --- 5. КОНТРОЛЬОВАНІ РЕТУРНИ ---
 
   if (isLoading) {
     return <div className="calc-container" style={{ opacity: 0 }} />;
@@ -332,10 +323,8 @@ export const CalculatorPage = () => {
         </p>
       </header>
 
-      {/* Селектор семестру (Мобільна версія) */}
 {isMobile && (
   <div className="mobile-sem-selector" style={{ marginBottom: "15px", padding: "0 15px" }}>
-    {/* Контейнер тепер має фіксовану ширину та центрований */}
     <div 
       className="custom-select-container compact" 
       style={{ 
@@ -376,7 +365,6 @@ export const CalculatorPage = () => {
             initial={{ opacity: 0, y: -5 }} 
             animate={{ opacity: 1, y: 0 }} 
             exit={{ opacity: 0, y: -5 }} 
-            // Список тепер займає 100% ширини контейнера (280px) і починається від лівого краю
             style={{ 
               left: 0, 
               width: "100%",
