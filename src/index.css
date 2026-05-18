@@ -4587,6 +4587,43 @@ input[type="number"] {
 /* ==========================================================================
    5. ПРАВА ПАНЕЛЬ (AI Sidebar Chat)
    ========================================================================== */
+/* Контейнер для кнопок ШІ */
+.ai-options-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 5px;
+}
+
+/* Стиль кожної кнопки-опції */
+.ai-option-btn {
+  background: rgba(255, 255, 255, 0.2); /* Скляний ефект */
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(150, 117, 227, 0.3); /* Тонкий фіолетовий контур */
+  color: #4a3e75;
+  padding: 8px 16px;
+  border-radius: 20px; /* Повністю закруглені */
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05); /* М'яка тінь */
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Ефект при наведенні */
+.ai-option-btn:hover {
+  background: #9675e3; /* Фірмовий фіолетовий */
+  color: white;
+  transform: translateY(-2px); /* Легке підстрибування вгору */
+  box-shadow: 0 6px 15px rgba(150, 117, 227, 0.3);
+  border-color: transparent;
+}
+
+/* Ефект при натисканні */
+.ai-option-btn:active {
+  transform: scale(0.95); /* Легке стиснення */
+}
 
 .planner-sidebar {
   flex-shrink: 0;

@@ -29,7 +29,13 @@ interface Plan {
 }
 
 interface UserData { id: number; name: string; email: string; }
-interface ChatMessage { id: string; role: "user" | "ai"; text: string; }
+
+interface ChatMessage { 
+  id: string; 
+  role: "user" | "ai"; 
+  text: string; 
+  options?: string[]; 
+}
 
 interface PlannerTask {
   id: string;
@@ -45,6 +51,7 @@ interface WorkSchedule {
   days: Record<string, boolean>;
 }
 
+// Використовуємо змінну середовища для запитів до бекенду
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 export const AIPlanerPage = () => {
@@ -55,7 +62,7 @@ export const AIPlanerPage = () => {
   const [workSchedule, setWorkSchedule] = useState<WorkSchedule | null>(null);
   const [userData, setUserData] = useState<UserData | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { id: "1", role: "ai", text: "Привіт! Я твій AI-асистент UniMind. Твої плани синхронізовані. Чим можу допомогти? ✨" }
+    { id: `ai-init-${Date.now()}`, role: "ai", text: "Привіт! Я твій AI-ментор UniMind. Я можу проаналізувати твої дедлайни та скласти ідеальний стратегічний план. З чого почнемо? ✨" }
   ]);
   const [inputValue, setInputValue] = useState("");
   const [isAiLoading, setIsAiLoading] = useState(false);
@@ -85,7 +92,7 @@ export const AIPlanerPage = () => {
               setAllPlans(dbData.plans);
             }
           }
-        } catch { console.log("Офлайн режим"); }
+        } catch { console.log("Бекенд на Render недоступний, перехід в офлайн"); }
       }
 
       if (!fetchedWorkSchedule) {
@@ -157,19 +164,21 @@ export const AIPlanerPage = () => {
       if (t === "Робота") return "work";
       return "personal";
     };
-    return allPlans.filter(p => p.time).map(p => {
-      const [h, m] = (p.time as string).split(':').map(Number);
-      const dur = p.type === "Навчання" ? 90 : 60;
-      const total = h * 60 + m + dur;
-      return {
-        id: String(p.id),
-        title: p.text,
-        timeStart: p.time as string,
-        timeEnd: `${Math.floor(total / 60).toString().padStart(2, '0')}:${(total % 60).toString().padStart(2, '0')}`,
-        category: mapCat(p.type),
-        dateKey: p.date 
-      };
-    });
+    return allPlans
+      .filter(p => p.id && p.time)
+      .map(p => {
+        const [h, m] = (p.time as string).split(':').map(Number);
+        const dur = p.type === "Навчання" ? 90 : 60;
+        const total = h * 60 + m + dur;
+        return {
+          id: String(p.id),
+          title: p.text,
+          timeStart: p.time as string,
+          timeEnd: `${Math.floor(total / 60).toString().padStart(2, '0')}:${(total % 60).toString().padStart(2, '0')}`,
+          category: mapCat(p.type),
+          dateKey: p.date 
+        };
+      });
   }, [allPlans]);
 
   const getTaskStyle = (timeStart: string, timeEnd: string, isDay: boolean) => {
@@ -206,54 +215,62 @@ export const AIPlanerPage = () => {
     setBaseDate(next);
   };
 
-const handleSendMessage = async () => {
-  if (!inputValue.trim() || isAiLoading) return;
-  
-  // Використовуємо більш надійний генератор ID для повідомлень
-  const userMsgId = `user-${Date.now()}`;
-  const userMsg: ChatMessage = { id: userMsgId, role: "user", text: inputValue };
-  
-  setMessages(prev => [...prev, userMsg]);
-  setInputValue("");
-  setIsAiLoading(true);
+  const handleOptionClick = (option: string) => {
+    setInputValue(option);
+    setTimeout(() => {
+      const sendBtn = document.getElementById('ai-send-trigger');
+      sendBtn?.click();
+    }, 100);
+  };
 
-  try {
-    const res = await fetch(`${API_URL}/ai/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        message: userMsg.text, 
-        userId: userData?.id, 
-        workSchedule 
-      })
-    });
-
-    if (!res.ok) throw new Error("Server error");
-
-    const data = await res.json();
+  const handleSendMessage = async (customText?: string) => {
+    const messageText = customText || inputValue;
+    if (!messageText.trim() || isAiLoading) return;
     
-    // Додаємо відповідь AI з унікальним ID
-    setMessages(prev => [...prev, { 
-      id: `ai-${Date.now()}`, 
-      role: "ai", 
-      text: data.reply 
-    }]);
+    const userMsgId = `user-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+    const userMsg: ChatMessage = { id: userMsgId, role: "user", text: messageText };
+    
+    setMessages(prev => [...prev, userMsg]);
+    setInputValue("");
+    setIsAiLoading(true);
 
-    if (data.newPlan) {
-      // Оновлюємо стейт планів, щоб вони з'явилися на сітці
-      setAllPlans(prev => [...prev, data.newPlan]);
+    try {
+      const res = await fetch(`${API_URL}/ai/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          message: userMsg.text, 
+          userId: userData?.id, 
+          workSchedule 
+        })
+      });
+
+      if (!res.ok) throw new Error("Server error");
+      const data = await res.json();
+      
+      setMessages(prev => [...prev, { 
+        id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`, 
+        role: "ai", 
+        text: data.reply,
+        options: data.options 
+      }]);
+
+      if (data.newPlans && data.newPlans.length > 0) {
+        setAllPlans(prev => [...prev, ...data.newPlans]);
+      } else if (data.newPlan) {
+        setAllPlans(prev => [...prev, data.newPlan]);
+      }
+
+    } catch {
+      setMessages(prev => [...prev, { 
+        id: `err-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`, 
+        role: "ai", 
+        text: "Вибач, стався збій зв'язку. Перевір, чи задеплоєно оновлений бекенд на Render! 🔌" 
+      }]);
+    } finally {
+      setIsAiLoading(false);
     }
-
-  } catch {
-    setMessages(prev => [...prev, { 
-      id: `err-${Date.now()}`, 
-      role: "ai", 
-      text: "Помилка зв'язку з сервером. Перевір, чи задеплоєно бекенд! " 
-    }]);
-  } finally {
-    setIsAiLoading(false);
-  }
-};
+  };
 
   const navText = useMemo(() => {
     if (viewMode === "day") {
@@ -270,15 +287,11 @@ const handleSendMessage = async () => {
   return (
     <div className="planner-container">
       <style>{`
-        /* СИМЕТРИЧНІ КАТЕГОРІЇ ЧЕРЕЗ ТІНЬ */
         .cat-study { background: rgba(142, 194, 255, 0.85) !important; box-shadow: inset 4px 0 0 0 #5a9cf8; }
         .cat-lab { background: rgba(162, 161, 255, 0.85) !important; box-shadow: inset 4px 0 0 0 #7d67ff; }
         .cat-work { background: rgba(220, 161, 255, 0.85) !important; box-shadow: inset 4px 0 0 0 #b867ff; }
         .cat-personal { background: rgba(161, 255, 213, 0.85) !important; box-shadow: inset 4px 0 0 0 #2cb464; }
 
-        .out-of-work { background: rgba(0,0,0,0.02); opacity: 0.5; }
-
-        /* ТИЖНЕВА КАРТКА - РУЧНЕ СИМЕТРИЧНЕ РОЗШИРЕННЯ */
         .planner-task-card {
           display: flex;
           flex-direction: column;
@@ -288,11 +301,9 @@ const handleSendMessage = async () => {
           transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
           overflow: hidden;
           cursor: pointer;
-          width: auto;
         }
 
         .planner-task-card:hover {
-          /* Вручну розширюємо межі в обидва боки */
           left: -15px !important; 
           right: -15px !important;
           height: auto !important;
@@ -300,39 +311,42 @@ const handleSendMessage = async () => {
           z-index: 1000 !important;
           padding: 10px !important;
           box-shadow: 0 10px 30px rgba(0,0,0,0.15);
-          transform: none !important; /* Прибираємо scale, щоб текст був чітким */
         }
 
-        /* ДЕННА КАРТКА - РУХ БЕЗ ЗМІНИ КОЛЬОРУ */
-        .day-task-card {
-          transition: transform 0.4s ease;
-        }
-        .day-task-card:hover {
-          transform: translateX(15px); /* Плавний рух */
-          z-index: 50 !important;
-        }
+        .day-task-card { transition: transform 0.4s ease; }
+        .day-task-card:hover { transform: translateX(15px); z-index: 50 !important; }
 
-        .task-title-container {
+        .ai-options-container {
           display: flex;
-          flex-direction: column;
-          align-items: center;
-          line-height: 1;
-          width: 100%;
+          flex-wrap: wrap;
+          gap: 10px;
+          margin-top: 14px;
         }
 
-        .task-detailed-time {
-          max-height: 0;
-          opacity: 0;
-          font-size: 11px;
-          transition: all 0.3s ease;
-          font-weight: 700;
+        .ai-option-btn {
+          background: rgba(255, 255, 255, 0.2);
+          backdrop-filter: blur(8px);
+          border: 1px solid rgba(150, 117, 227, 0.3);
           color: #4a3e75;
+          padding: 8px 16px;
+          border-radius: 20px;
+          font-size: 13px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
         }
 
-        .planner-task-card:hover .task-detailed-time {
-          max-height: 20px;
-          opacity: 1;
-          margin-top: 4px;
+        .ai-option-btn:hover {
+          background: #9675e3;
+          color: white;
+          transform: translateY(-2px);
+          box-shadow: 0 6px 15px rgba(150, 117, 227, 0.3);
+          border-color: transparent;
+        }
+
+        .ai-option-btn:active {
+          transform: scale(0.95);
         }
       `}</style>
 
@@ -393,7 +407,8 @@ const handleSendMessage = async () => {
 
                     <div style={{ position: 'absolute', top: '10px', left: '55px', right: 0, bottom: 0, display: 'flex', pointerEvents: 'none' }}>
                       {currentWeekDays.map((dayObj, i) => {
-                        const dateStr = `${dayObj.getDate()}-${dayObj.getMonth()}-${dayObj.getFullYear()}`;
+                        // Формат дати без нулів для синхронізації
+                        const dateStr = `${dayObj.getDate()}-${dayObj.getMonth() + 1}-${dayObj.getFullYear()}`;
                         const tasksForDay = plannerTasks.filter(t => t.dateKey === dateStr);
                         return (
                           <div key={i} style={{ flex: 1, position: 'relative', height: '100%' }}>
@@ -430,7 +445,8 @@ const handleSendMessage = async () => {
                     );
                   })}
                   <div style={{ position: 'absolute', top: '15px', left: '55px', right: 0, bottom: 0, pointerEvents: 'none' }}>
-                    {plannerTasks.filter(t => t.dateKey === `${baseDate.getDate()}-${baseDate.getMonth()}-${baseDate.getFullYear()}`).map(task => (
+                    {/* Формат дати без нулів для синхронізації */}
+                    {plannerTasks.filter(t => t.dateKey === `${baseDate.getDate()}-${baseDate.getMonth() + 1}-${baseDate.getFullYear()}`).map(task => (
                       <div key={task.id} className={`${getCategoryInfo(task.category).colorClass} day-task-card`} 
                            style={{ ...getTaskStyle(task.timeStart, task.timeEnd, true), display: 'flex', alignItems: 'center', padding: '0 30px', borderRadius: '12px', pointerEvents: 'auto' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '20px', width: '100%' }}>
@@ -464,7 +480,24 @@ const handleSendMessage = async () => {
           <AnimatePresence>
             {messages.map((msg) => (
               <motion.div key={msg.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={msg.role === "ai" ? "ai-message-card" : "user-message-card"}>
-                {msg.role === "ai" ? (<><div className="ai-message-badge"><Sparkle size={14} weight="fill" /><span>UniMind AI</span></div><p className="ai-main-text" style={{ whiteSpace: "pre-wrap", margin: 0 }}>{msg.text}</p></>) : (<p className="user-text" style={{ margin: 0 }}>{msg.text}</p>)}
+                {msg.role === "ai" ? (
+                  <>
+                    <div className="ai-message-badge"><Sparkle size={14} weight="fill" /><span>UniMind AI</span></div>
+                    <p className="ai-main-text" style={{ whiteSpace: "pre-wrap", margin: 0 }}>{msg.text}</p>
+                    
+                    {msg.options && msg.options.length > 0 && (
+                      <div className="ai-options-container">
+                        {msg.options.map((opt, idx) => (
+                          <button key={idx} className="ai-option-btn" onClick={() => handleOptionClick(opt)}>
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="user-text" style={{ margin: 0 }}>{msg.text}</p>
+                )}
               </motion.div>
             ))}
             {isAiLoading && (<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="ai-typing"><CircleNotch size={24} color="#9675e3" className="spin-fast" /><span>Аналізую запит...</span></motion.div>)}
@@ -473,8 +506,15 @@ const handleSendMessage = async () => {
         </div>
         <div className="sidebar-input-area">
           <div className="input-box">
-            <input type="text" placeholder="Скажи, що змінити..." value={inputValue} onChange={(e) => setInputValue(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSendMessage()} disabled={isAiLoading} />
-            <button className="send-btn" onClick={handleSendMessage} disabled={isAiLoading || !inputValue.trim()}><PaperPlaneRight size={22} weight="fill" /></button>
+            <input 
+              type="text" 
+              placeholder="Скажи, що змінити..." 
+              value={inputValue} 
+              onChange={(e) => setInputValue(e.target.value)} 
+              onKeyDown={e => e.key === "Enter" && handleSendMessage()} 
+              disabled={isAiLoading} 
+            />
+            <button id="ai-send-trigger" className="send-btn" onClick={() => handleSendMessage()} disabled={isAiLoading || !inputValue.trim()}><PaperPlaneRight size={22} weight="fill" /></button>
           </div>
         </div>
       </motion.div>
