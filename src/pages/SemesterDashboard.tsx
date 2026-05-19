@@ -32,6 +32,16 @@ interface UserData {
   email: string;
 }
 
+// Додано інтерфейс для планів, щоб типізувати взаємодію з календарем
+interface Plan {
+  id: number | string;
+  text: string;
+  completed: boolean;
+  date: string;
+  type: string;
+  time?: string;
+}
+
 interface DashboardProps {
   semesterId: string | null;
   setCurrentScreen: (screen: string) => void;
@@ -244,7 +254,8 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
     setIsSubjectModalOpen(false); setEditingSubjectId(null);
   };
 
-  const handleSaveTask = () => {
+  // Перетворено на async для доступу до localforage
+  const handleSaveTask = async () => {
     if (isArchived || !activeSubject) return;
     setErrorMsg("");
 
@@ -276,9 +287,11 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
     }
 
     const oldTask = editingTaskId ? activeSubject.tasks.find((t) => t.id === editingTaskId) : null;
+    const finalTaskName = newTaskType === "Курсова робота" ? activeSubject.name : newTaskName;
+    
     const savedTask: Task = {
       id: editingTaskId || crypto.randomUUID(),
-      name: newTaskType === "Курсова робота" ? activeSubject.name : newTaskName,
+      name: finalTaskName,
       type: newTaskType,
       score: oldTask ? oldTask.score : null,
       maxScore: finalMaxScore,
@@ -296,6 +309,50 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
     syncWithGlobalStorage(updated);
     setExpandedGroups((prev) => ({ ...prev, [newTaskType]: true }));
     setIsTaskModalOpen(false);
+
+    // --- ІНТЕГРАЦІЯ З КАЛЕНДАРЕМ ---
+    if (newTaskDeadline) {
+      try {
+        const guestStatus = (await localforage.getItem("isGuest")) === "true";
+        const storedUser = await localforage.getItem<UserData>("userData");
+        const plansKey = guestStatus ? "unimind-plans-guest" : `unimind-plans-${storedUser?.name || "user"}`;
+        
+        const existingPlans: Plan[] = (await localforage.getItem(plansKey)) || [];
+        
+        // Перетворюємо дедлайн у формат CalendarPage: D-M-YYYY (місяці 0-11)
+        const d = new Date(newTaskDeadline);
+        const formattedDate = `${d.getDate()}-${d.getMonth()}-${d.getFullYear()}`;
+        
+        // Визначаємо тип для календаря
+        const calendarType = (newTaskType === "Лабораторні" || newTaskType === "Індивідуальна робота") 
+          ? "Лабораторна" 
+          : "Навчання";
+          
+        const planText = `${activeSubject.name}: ${finalTaskName}`;
+        
+        // Перевіряємо чи такий план вже існує (щоб не створювати дублі при редагуванні)
+        const existingPlanIndex = existingPlans.findIndex(p => p.text === planText);
+        
+        if (existingPlanIndex !== -1) {
+          // Оновлюємо існуючий план
+          existingPlans[existingPlanIndex].date = formattedDate;
+          existingPlans[existingPlanIndex].type = calendarType;
+        } else {
+         
+        existingPlans.push({
+          id: crypto.randomUUID(), 
+          text: planText,
+          completed: false,
+          date: formattedDate,
+          type: calendarType
+        });
+        }
+        
+        await localforage.setItem(plansKey, existingPlans);
+      } catch (error) {
+        console.error("Помилка при додаванні завдання в календар:", error);
+      }
+    }
   };
 
   const handleNumberChange = (value: string, setter: (val: number | "") => void) => {
@@ -308,9 +365,12 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
   return (
     <motion.div className="dashboard-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       
-      {/* ДЕСКТОПНА НАВІГАЦІЯ */}
+     {/* ДЕСКТОПНА НАВІГАЦІЯ */}
       {!isMobile && (
-        <div className="dashboard-header-block desktop-only">
+        <div 
+          className="dashboard-header-block desktop-only" 
+          style={{ display: "flex", justifyContent: "space-between", alignItems: "center"}}
+        >
           <button className="dashboard-back-btn" onClick={() => setCurrentScreen("main")}>
             <ArrowLeft size={20} weight="bold" /> <span>Назад до семестрів</span>
           </button>
@@ -408,8 +468,7 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
           </div>
 
           {/* 3. БАЛИ (Інпут + Макс. бал) */}
-          <div className="col-score" style={{ fontSize: '14px'
-}}>
+          <div className="col-score" style={{ fontSize: '14px' }}>
             <input 
               type="text" 
               disabled={isArchived} 
@@ -594,7 +653,7 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
         </div>
       )}
 
-      {/* --- МОДАЛЬНІ ВІКНА (Ретельно відформатовані для уникнення помилок) --- */}
+      {/* --- МОДАЛЬНІ ВІКНА --- */}
       <AnimatePresence>
         {(isSubjectModalOpen || isTaskModalOpen) && (
           <div className="sem-modal-overlay" onClick={() => { setIsSubjectModalOpen(false); setIsTaskModalOpen(false); setIsTypeDropdownOpen(false); setEditingSubjectId(null); setEditingTaskId(null); setErrorMsg(""); }}>

@@ -4509,13 +4509,8 @@ input[type="number"] {
 
 /* Ефект при наведенні (Hover) */
 .planner-task-card:hover {
-  height: auto !important; /* Дозволяємо картці вирости */
-  min-height: fit-content;
-  width: 200px !important; /* Збільшуємо ширину */
-  z-index: 1000 !important; /* Виносимо на передній план */
-  padding: 12px !important;
-  box-shadow: 0 10px 25px rgba(0,0,0,0.15);
-  border-radius: 12px;
+  transform: translateY(-5px);
+  box-shadow: 0 10px 20px rgba(92, 75, 117, 0.15);
 }
 .task-title-container {
   display: flex;
@@ -4799,6 +4794,267 @@ input[type="number"] {
 @media (max-width: 1250px) {
   .planner-container { flex-direction: column; padding: 20px; height: auto; }
   .planner-sidebar { width: 100%; min-height: 400px; }
+}
+
+/* =========================================
+   КНОПКА СПОВІЩЕНЬ В САЙДБАРІ (БЕЗ ЕФЕКТІВ)
+   ========================================= */
+.notif-sidebar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: #5c4b75;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  width: calc(100% - 40px);
+  margin: 0 20px;
+  padding: 10px 0; /* Прибираємо зайві рамки */
+  transition: transform 0.2s ease; /* Плавна анімація */
+  position: relative;
+  outline: none;
+}
+
+/* Збільшення при наведенні */
+.notif-sidebar-btn:hover {
+  transform: scale(1.05);
+}
+
+/* Стискання при натисканні */
+.notif-sidebar-btn:active {
+  transform: scale(0.95);
+}
+
+/* =========================================
+   СТИЛІ ДЛЯ ВІКНА СПОВІЩЕНЬ (NOTIFICATIONS)
+   ========================================= */
+.notif-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background-color: #fba6d6;
+  color: #4a3e75;
+  font-size: 10px;
+  font-weight: bold;
+  height: 18px;
+  min-width: 18px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  border: none;
+  z-index: 2;
+}
+
+.notif-popover {
+  position: absolute;
+  bottom: 30px; 
+  left: 100px; 
+  width: 340px;
+  height: 420px; /* ЖОРСТКО ФІКСОВАНА ВИСОТА */
+  background: rgba(193, 171, 255, 0.4); 
+  backdrop-filter: blur(25px);
+  -webkit-backdrop-filter: blur(25px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(92, 75, 117, 0.2);
+  display: flex;
+  flex-direction: column;
+  z-index: 1000;
+  overflow: hidden;
+  cursor: default;
+}
+
+/* МОБІЛЬНА ВЕРСІЯ: Виїжджає знизу на весь екран */
+.mobile-notif-backdrop {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 998;
+}
+
+@media (max-width: 768px) {
+  .notif-popover.mobile-bottom-sheet {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    top: auto;
+    width: 100vw;
+    max-width: 100vw;
+    border-radius: 24px 24px 0 0; /* Округлені тільки верхні кути */
+    max-height: 80vh; /* Займає до 80% екрану */
+    z-index: 999;
+    background: rgba(214, 199, 255, 0.7); /* Трохи менш прозорий для телефонів */
+    border-bottom: none;
+  }
+  .notif-popover.mobile-bottom-sheet .notif-body {
+    max-height: calc(80vh - 60px);
+  }
+}
+
+.notif-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 20px;
+  background: rgba(255, 255, 255, 0.3);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+.notif-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #4a3e75;
+  font-weight: bold;
+}
+
+.notif-count {
+  background: #9675e3;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+/* =========================================
+   ФІЛЬТРИ СПОВІЩЕНЬ (Всі / Семестр / Календар)
+   ========================================= */
+.notif-filters {
+  display: flex;
+  gap: 8px;
+  padding: 10px 15px;
+  background: rgba(255, 255, 255, 0.2);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.notif-filter-btn {
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 16px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #5c4b75;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.notif-filter-btn:hover {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.notif-filter-btn.active {
+  background: #9675e3;
+  color: white;
+  border-color: #9675e3;
+  box-shadow: 0 2px 8px rgba(150, 117, 227, 0.4);
+}
+
+
+.notif-body {
+  padding: 10px 15px;
+  flex: 1;           
+  overflow-y: auto;  
+  max-height: none;  
+}
+
+.notif-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.notif-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.notif-body::-webkit-scrollbar-thumb {
+  background: rgba(150, 117, 227, 0.3);
+  border-radius: 10px;
+}
+
+.notif-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(150, 117, 227, 0.6);
+}
+.notif-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  color: #6a5a8a;
+  text-align: center;
+  gap: 10px;
+}
+
+.notif-item {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  margin-bottom: 8px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.6); /* Білі плашки для контрасту з фіолетовим фоном */
+  transition: all 0.2s ease;
+  align-items: flex-start;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.notif-item:hover {
+  background: rgba(255, 255, 255, 0.9);
+  transform: translateY(-1px);
+}
+
+.notif-item.task .notif-icon {
+  background: rgba(255, 77, 79, 0.1);
+  color: #ff4d4f;
+}
+
+.notif-item.plan .notif-icon {
+  background: rgba(150, 117, 227, 0.15);
+  color: #9675e3;
+}
+
+.notif-icon {
+  min-width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notif-content {
+  flex: 1;
+}
+
+.notif-content h4 {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+  color: #333;
+  font-weight: 600;
+  text-align: left;
+}
+
+.notif-content p {
+  margin: 0 0 6px 0;
+  font-size: 13px;
+  color: #555;
+  line-height: 1.3;
+  text-align: left;
+}
+
+.notif-time {
+  font-size: 11px;
+  font-weight: 700;
+  color: #7b5bcf;
+  background: rgba(150, 117, 227, 0.15);
+  padding: 2px 6px;
+  border-radius: 6px;
+  display: inline-block;
 }
 
 @media (max-width: 600px) {

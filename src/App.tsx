@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import localforage from "localforage";
 import { Calculator, NotebookPen, TableOfContents } from "lucide-react";
@@ -6,6 +6,7 @@ import {
   HeadCircuitIcon,
   CalendarCheckIcon,
   CaretDownIcon,
+  Bell,
 } from "@phosphor-icons/react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faUserGraduate } from "@fortawesome/free-solid-svg-icons";
@@ -35,9 +36,12 @@ interface ZoomEvent extends Event {
 }
 interface Task {
   id: string;
+  name: string;
   type: string;
+  status: string;
   score: number | null;
   credits?: number;
+  deadline?: string;
 }
 interface Subject {
   id: string;
@@ -54,8 +58,9 @@ interface Semester {
 }
 interface Plan {
   id: string;
-  title: string;
+  text: string;
   date: string;
+  time?: string;
   completed: boolean;
   [key: string]: unknown;
 }
@@ -72,6 +77,16 @@ interface UserData {
   plans?: Plan[];
 }
 
+// Інтерфейс для сповіщення
+interface NotificationItem {
+  id: string;
+  title: string;
+  message: string;
+  timeRemaining: string;
+  type: "task" | "plan";
+  rawDate: Date;
+}
+
 function App() {
   const [isAppLoading, setIsAppLoading] = useState(true);
   const [currentScreen, setCurrentScreen] = useState<string>("start");
@@ -80,7 +95,7 @@ function App() {
   );
   const [name, setName] = useState<string>("");
   const [email, setEmail] = useState<string>("");
-  const [avatar, setAvatar] = useState<string | null>(null); // Стан для аватара
+  const [avatar, setAvatar] = useState<string | null>(null);
   const [password, setPassword] = useState<string>("");
   const [confirmPassword, setConfirmPassword] = useState<string>("");
   const [error, setError] = useState<string>("");
@@ -92,7 +107,13 @@ function App() {
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [syncType, setSyncType] = useState<"register" | "login">("register");
 
-  // Автоматична міграція старих даних з localStorage при першому запуску
+  const [notifFilter, setNotifFilter] = useState<"all" | "task" | "plan">(
+    "all",
+  );
+  const [isNotifOpen, setIsNotifOpen] = useState(false);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const notifRef = useRef<HTMLDivElement>(null);
+
   const migrateFromLocalStorage = async () => {
     const migratedFlag = await localforage.getItem("migrated_to_idb");
     if (!migratedFlag) {
@@ -112,11 +133,9 @@ function App() {
     }
   };
 
-  // Ініціалізація додатку при старті
   useEffect(() => {
     const initApp = async () => {
       await migrateFromLocalStorage();
-
       const isLoggedIn = await localforage.getItem("isLoggedIn");
       const isGuest = await localforage.getItem("isGuest");
       const savedUser = await localforage.getItem<UserData>("userData");
@@ -131,7 +150,6 @@ function App() {
         setAvatar(savedUser.avatar || null);
         setCurrentScreen("main");
       }
-
       setIsAppLoading(false);
     };
     initApp();
@@ -143,7 +161,128 @@ function App() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // Відстеження змін в даних користувача
+  // --- ЛОГІКА ГЕНЕРАЦІЇ СПОВІЩЕНЬ ---
+  const fetchNotifications = useCallback(async () => {
+    if (!name) return [];
+    const now = new Date();
+    const newNotifs: NotificationItem[] = [];
+    const storageName = name === "Гість" ? "guest" : name;
+
+    // 1. Перевірка завдань з семестрів
+    const semesters = await localforage.getItem<Semester[]>(
+      `unimind-semesters-${storageName}`,
+    );
+    if (semesters) {
+      semesters.forEach((sem) => {
+        sem.subjects?.forEach((subj) => {
+          subj.tasks?.forEach((task) => {
+            if (task.deadline && task.status !== "Здано") {
+              const deadlineDate = new Date(task.deadline);
+              deadlineDate.setHours(23, 59, 59, 999);
+              const diffTime = deadlineDate.getTime() - now.getTime();
+              const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+              if (diffDays > 1 && diffDays <= 5) {
+                newNotifs.push({
+                  id: `task-${task.id}-5d`,
+                  title: "Наближається дедлайн!",
+                  message: `${subj.name}: ${task.name}`,
+                  timeRemaining: `Залишилось: ${diffDays} дн.`,
+                  type: "task",
+                  rawDate: deadlineDate,
+                });
+              } else if (diffDays === 1 || diffDays === 0) {
+                newNotifs.push({
+                  id: `task-${task.id}-1d`,
+                  title:
+                    "Увага! Дедлайн " +
+                    (diffDays === 0 ? "СЬОГОДНІ" : "ЗАВТРА"),
+                  message: `${subj.name}: ${task.name}`,
+                  timeRemaining: "Терміново!",
+                  type: "task",
+                  rawDate: deadlineDate,
+                });
+              }
+            }
+          });
+        });
+      });
+    }
+
+    // 2. Перевірка планів
+    const plans = await localforage.getItem<Plan[]>(
+      `unimind-plans-${storageName}`,
+    );
+    if (plans) {
+      plans.forEach((plan) => {
+        if (!plan.completed && plan.date && plan.time) {
+          const parts = plan.date.split("-");
+          if (parts.length === 3) {
+            const planDate = new Date(
+              Number(parts[2]),
+              Number(parts[1]),
+              Number(parts[0]),
+            );
+            const [hours, minutes] = plan.time.split(":");
+            planDate.setHours(Number(hours), Number(minutes), 0, 0);
+
+            const diffTime = planDate.getTime() - now.getTime();
+            const diffHours = diffTime / (1000 * 60 * 60);
+
+            if (diffHours > 0 && diffHours <= 24) {
+              newNotifs.push({
+                id: `plan-${plan.id}-24h`,
+                title: "Запланована подія",
+                message: plan.text,
+                timeRemaining: `Через ${Math.ceil(diffHours)} год. (${plan.time})`,
+                type: "plan",
+                rawDate: planDate,
+              });
+            }
+          }
+        }
+      });
+    }
+
+    newNotifs.sort((a, b) => a.rawDate.getTime() - b.rawDate.getTime());
+    return newNotifs;
+  }, [name]);
+
+  // Оновлюємо нотифікації безпечно для ESLint
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadNotifications = async () => {
+      const data = await fetchNotifications();
+      if (isMounted) {
+        setNotifications(data);
+      }
+    };
+
+    loadNotifications();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentScreen, fetchNotifications]);
+
+  // Закриття нотифікацій при кліку поза вікном
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        notifRef.current &&
+        !notifRef.current.contains(event.target as Node)
+      ) {
+        setIsNotifOpen(false);
+      }
+    };
+    if (isNotifOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isNotifOpen]);
+  // --- /КІНЕЦЬ ЛОГІКИ СПОВІЩЕНЬ ---
+
   useEffect(() => {
     const handleStorageChange = async () => {
       const savedUser = await localforage.getItem<UserData>("userData");
@@ -177,7 +316,6 @@ function App() {
       window.removeEventListener("userDataUpdated", handleStorageChange);
   }, [name]);
 
-  // Запобігання зуму на мобільних
   useEffect(() => {
     const restrictedScreens = ["start", "signup", "login", "main"];
     const preventZoom = (e: Event) => {
@@ -196,7 +334,6 @@ function App() {
     };
   }, [currentScreen]);
 
-  // Робота з IndexedDB
   const populateLocalStorageFromDB = async (user: UserData) => {
     if (user.semesters)
       await localforage.setItem(
@@ -329,10 +466,8 @@ function App() {
       "unimind-work-times-guest",
       "unimind-active-days-guest",
     ];
-    for (const key of guestKeys) {
-      await localforage.removeItem(key);
-    }
-    await localforage.removeItem("userData"); // Важливо видалити старого юзера
+    for (const key of guestKeys) await localforage.removeItem(key);
+    await localforage.removeItem("userData");
     await localforage.setItem("isGuest", "true");
     await localforage.setItem("isLoggedIn", "false");
     setName("Гість");
@@ -444,10 +579,9 @@ function App() {
       triggerShake();
     }
   };
-
-  if (isAppLoading) {
+const filteredNotifications = notifications.filter(n => notifFilter === "all" ? true : n.type === notifFilter);
+  if (isAppLoading)
     return <div className="loading-screen">Завантаження UniMind...</div>;
-  }
 
   const renderPageContent = () => {
     switch (currentScreen) {
@@ -601,7 +735,156 @@ function App() {
                   <div className="navName">UniMind</div>
                 </div>
 
-                <div className="prof">
+                <div
+                  className="prof"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: isMobile ? "15px" : "0",
+                  }}
+                >
+                  {/* === Мобільний дзвіночок сповіщень (тільки для телефонів) === */}
+                  {isMobile && (
+                    <div
+                      style={{
+                        position: "relative",
+                        display: "flex",
+                        alignItems: "center",
+                      }}
+                    >
+                      <button
+                        onClick={() => setIsNotifOpen(!isNotifOpen)}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          padding: 0,
+                          position: "relative",
+                        }}
+                      >
+                        <Bell
+                          size={28}
+                          color="#5c4b75"
+                          weight={notifications.length > 0 ? "fill" : "regular"}
+                        />
+                        {notifications.length > 0 && (
+                          <span
+                            className="notif-badge"
+                            style={{ top: "-4px", right: "-4px" }}
+                          >
+                            {notifications.length}
+                          </span>
+                        )}
+                      </button>
+
+                      {/* Спливаюче вікно для мобілки (Виїжджає знизу) */}
+                      <AnimatePresence>
+                        {isNotifOpen && (
+                          <>
+                            {/* Затемнення фону на мобілці */}
+                            <motion.div
+                              className="mobile-notif-backdrop"
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 1 }}
+                              exit={{ opacity: 0 }}
+                              onClick={() => setIsNotifOpen(false)}
+                            />
+                            <motion.div
+                              className="notif-popover glass-panel mobile-bottom-sheet"
+                              initial={{ y: "100%" }}
+                              animate={{ y: 0 }}
+                              exit={{ y: "100%" }}
+                              transition={{
+                                type: "spring",
+                                damping: 25,
+                                stiffness: 200,
+                              }}
+                            >
+                              <div className="notif-header">
+                                <h3>Сповіщення</h3>
+                                <span className="notif-count">
+                                  {notifications.length}
+                                </span>
+                              </div>
+                              <div className="notif-body scrollable-area">
+                                {notifications.length === 0 ? (
+                                  <div className="notif-empty">
+                                    <Bell
+                                      size={32}
+                                      weight="duotone"
+                                      opacity={0.5}
+                                    />
+                                    <p>У вас немає нових сповіщень</p>
+                                  </div>
+                                ) : (
+                                  <>
+                                    {/* Група 1: Дедлайни (Семестр) */}
+                                    {notifications.filter(
+                                      (n) => n.type === "task",
+                                    ).length > 0 && (
+                                      <div className="notif-group">
+                                        <h5 className="notif-group-title">
+                                          Дедлайни (Семестр)
+                                        </h5>
+                                        {notifications
+                                          .filter((n) => n.type === "task")
+                                          .map((n) => (
+                                            <div
+                                              key={n.id}
+                                              className="notif-item task"
+                                            >
+                                              <div className="notif-icon">
+                                                <NotebookPen size={20} />
+                                              </div>
+                                              <div className="notif-content">
+                                                <h4>{n.title}</h4>
+                                                <p>{n.message}</p>
+                                                <span className="notif-time">
+                                                  {n.timeRemaining}
+                                                </span>
+                                              </div>
+                                            </div>
+                                          ))}
+                                      </div>
+                                    )}
+                                    {/* Група 2: Справи (Календар) */}
+                                    {notifications.filter(
+                                      (n) => n.type === "plan",
+                                    ).length > 0 && (
+                                      <div className="notif-group">
+                                        <h5 className="notif-group-title">
+                                          Заплановані події (Календар)
+                                        </h5>
+                                        {notifications
+                                          .filter((n) => n.type === "plan")
+                                          .map((n) => (
+                                            <div
+                                              key={n.id}
+                                              className="notif-item plan"
+                                            >
+                                              <div className="notif-icon">
+                                                <CalendarCheckIcon size={20} />
+                                              </div>
+                                              <div className="notif-content">
+                                                <h4>{n.title}</h4>
+                                                <p>{n.message}</p>
+                                                <span className="notif-time">
+                                                  {n.timeRemaining}
+                                                </span>
+                                              </div>
+                                            </div>
+                                          ))}
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            </motion.div>
+                          </>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  )}
+
                   <button
                     className="account-btn"
                     onClick={() => setCurrentScreen("profile")}
@@ -660,18 +943,22 @@ function App() {
                         </span>
                       )}
                     </div>
-                    <span
-                      className="account-name"
-                      style={{ fontWeight: "bold" }}
-                    >
-                      {name}
-                    </span>
-                    <CaretDownIcon
-                      size={18}
-                      color="#5c4b75"
-                      weight="bold"
-                      style={{ marginLeft: "-2px" }}
-                    />
+                    {!isMobile && (
+                      <span
+                        className="account-name"
+                        style={{ fontWeight: "bold" }}
+                      >
+                        {name}
+                      </span>
+                    )}
+                    {!isMobile && (
+                      <CaretDownIcon
+                        size={18}
+                        color="#5c4b75"
+                        weight="bold"
+                        style={{ marginLeft: "-2px" }}
+                      />
+                    )}
                   </button>
                 </div>
               </div>
@@ -729,6 +1016,135 @@ function App() {
                 <Calculator size={35} color="#5c4b75" strokeWidth={2.1} />
                 {isMobile && <span>Калькулятор</span>}
               </button>
+
+              {/* КНОПКА СПОВІЩЕНЬ ЗІ ЗНАЧКОМ (ТІЛЬКИ ДЕСКТОП) */}
+              {!isMobile && (
+                <div
+                  className="sidebar-bottom-actions"
+                  ref={notifRef}
+                  style={{
+                    marginTop: "auto",
+                    paddingBottom: "20px",
+                    position: "relative",
+                    width: "100%",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                  }}
+                >
+                  {/* Кнопка розтягнута на всю ширину як інші (з фіксованим текстом!) */}
+                  <button
+                    className={`notif-sidebar-btn ${isNotifOpen ? "active" : ""}`}
+                    onClick={() => setIsNotifOpen(!isNotifOpen)}
+                  >
+                    <div
+                      style={{
+                        position: "relative",
+                        display: "flex",
+                        alignItems: "center",
+                      }}
+                    >
+                      <Bell size={35} color="#5c4b75" weight="regular" />
+                      {notifications.length > 0 && (
+                        <span className="notif-badge">
+                          {notifications.length}
+                        </span>
+                      )}
+                    </div>
+                    {/* Жорстко задаємо розмір, щоб глобальні стилі не ламали текст */}
+                    <span
+                      style={{
+                        fontSize: "16px",
+                        fontWeight: "600",
+                        color: "#5c4b75",
+                      }}
+                    >
+                    </span>
+                  </button>
+
+                  {/* ВІКНО СПОВІЩЕНЬ (ДЕСКТОП) */}
+                  <AnimatePresence>
+                    {isNotifOpen && (
+                      <motion.div
+                        className="notif-popover glass-panel"
+                        initial={{ opacity: 0, x: -10, scale: 0.95 }}
+                        animate={{ opacity: 1, x: 0, scale: 1 }}
+                        exit={{ opacity: 0, x: -10, scale: 0.95 }}
+                        transition={{ duration: 0.2 }}
+                      >
+                        <div className="notif-header">
+                          <h3>Сповіщення</h3>
+                          <span className="notif-count">
+                            {filteredNotifications.length}
+                          </span>
+                        </div>
+
+                        {/* КНОПКИ ФІЛЬТРУВАННЯ */}
+                        <div className="notif-filters">
+                          <button
+                            className={`notif-filter-btn ${notifFilter === "all" ? "active" : ""}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setNotifFilter("all");
+                            }}
+                          >
+                            Всі
+                          </button>
+                          <button
+                            className={`notif-filter-btn ${notifFilter === "task" ? "active" : ""}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setNotifFilter("task");
+                            }}
+                          >
+                            Семестр
+                          </button>
+                          <button
+                            className={`notif-filter-btn ${notifFilter === "plan" ? "active" : ""}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setNotifFilter("plan");
+                            }}
+                          >
+                            Календар
+                          </button>
+                        </div>
+
+                        <div className="notif-body scrollable-area">
+                          {filteredNotifications.length === 0 ? (
+                            <div className="notif-empty">
+                              <Bell size={32} weight="duotone" opacity={0.5} />
+                              <p>Немає сповіщень у цій категорії</p>
+                            </div>
+                          ) : (
+                            filteredNotifications.map((n) => (
+                              <div
+                                key={n.id}
+                                className={`notif-item ${n.type}`}
+                              >
+                                <div className="notif-icon">
+                                  {n.type === "task" ? (
+                                    <NotebookPen size={20} />
+                                  ) : (
+                                    <CalendarCheckIcon size={20} />
+                                  )}
+                                </div>
+                                <div className="notif-content">
+                                  <h4>{n.title}</h4>
+                                  <p>{n.message}</p>
+                                  <span className="notif-time">
+                                    {n.timeRemaining}
+                                  </span>
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
             </aside>
 
             <main className="content">
