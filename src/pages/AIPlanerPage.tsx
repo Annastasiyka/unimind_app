@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import localforage from "localforage";
 import { 
@@ -13,7 +13,9 @@ import {
   Briefcase,
   User,
   Coffee,
-  Trash
+  Trash,
+  ArrowCounterClockwise,
+  WarningCircle 
 } from "@phosphor-icons/react";
 
 const monthNames = ["січня", "лютого", "березня", "квітня", "травня", "червня", "липня", "серпня", "вересня", "жовтня", "листопада", "грудня"];
@@ -28,57 +30,43 @@ interface Plan {
   date: string;
   type: string;
   time?: string;
+  origin?: string;
 }
 
 interface UserData { id: number; name: string; email: string; }
-
-interface ChatMessage { 
-  id: string; 
-  role: "user" | "ai"; 
-  text: string; 
-}
-
-interface PlannerTask {
-  id: string;
-  title: string;
-  timeStart: string;
-  timeEnd: string;
-  category: "study" | "lab" | "work" | "personal" | "wellness";
-  dateKey: string; 
-}
-
-interface WorkSchedule {
-  times: Record<string, string>;
-  days: Record<string, boolean>;
-}
+interface ChatMessage { id: string; role: "user" | "ai"; text: string; }
+interface PlannerTask { id: string; title: string; timeStart: string; timeEnd: string; category: "study" | "lab" | "work" | "personal" | "wellness"; dateKey: string; }
+interface WorkSchedule { times: Record<string, string>; days: Record<string, boolean>; }
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+
+const normalizeDate = (dateStr: string) => {
+  if (!dateStr) return "";
+  const parts = dateStr.split(/[-.]/);
+  if (parts.length !== 3) return dateStr;
+  let d, m, y;
+  if (parts[0].length === 4) { [y, m, d] = parts; } else { [d, m, y] = parts; }
+  return `${parseInt(String(d))}-${parseInt(String(m))}-${y}`;
+};
 
 export const AIPlanerPage = () => {
   const [viewMode, setViewMode] = useState<"day" | "week">("day");
   const [baseDate, setBaseDate] = useState(new Date());
   const [currentHour, setCurrentHour] = useState("");
   const [allPlans, setAllPlans] = useState<Plan[]>([]);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
   const [workSchedule, setWorkSchedule] = useState<WorkSchedule | null>(null);
   const [userData, setUserData] = useState<UserData | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [isAutoScheduling, setIsAutoScheduling] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const lastAutoProcessedRef = useRef<string>("");
 
-  // Функція нормалізації дати для синхронізації з CalendarPage.tsx (місяці 0-11)
-  const normalizeDate = (dateStr: string) => {
-    if (!dateStr) return "";
-    const parts = dateStr.split(/[-.]/);
-    if (parts.length !== 3) return dateStr;
-    let d, m, y;
-    if (parts[0].length === 4) { [y, m, d] = parts; } 
-    else { [d, m, y] = parts; }
-    return `${parseInt(String(d))}-${parseInt(String(m))}-${y}`;
-  };
-
-  // 1. ІНІЦІАЛІЗАЦІЯ (IndexedDB + Backend Sync)
   useEffect(() => {
     const initPlanner = async () => {
       const storedUser = await localforage.getItem<UserData>("userData");
@@ -106,7 +94,7 @@ export const AIPlanerPage = () => {
             if (dbData.chatHistory && dbData.chatHistory.length > 0) {
               setMessages(dbData.chatHistory);
             } else {
-              setMessages([{ id: `ai-init-${Date.now()}`, role: "ai", text: "Привіт! Твої плани синхронізовано. Спробуємо зробити графік ідеальним? ✨" }]);
+              setMessages([{ id: `ai-init-${Date.now()}`, role: "ai", text: "Привіт! Твої плани завантажено. Я стежу за новими завданнями! ✨" }]);
             }
           }
         } catch { console.error("Бекенд недоступний"); }
@@ -123,11 +111,8 @@ export const AIPlanerPage = () => {
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
-  // 2. ДИНАМІЧНИЙ ТИЖДЕНЬ
   const currentWeekDays = useMemo(() => {
     return Array.from({ length: 7 }).map((_, i) => {
       const d = new Date(baseDate);
@@ -136,7 +121,6 @@ export const AIPlanerPage = () => {
     });
   }, [baseDate]);
 
-  // 3. СІТКА ГОДИН
   const hoursGrid = useMemo(() => {
     let startH = 8, endH = 22;
     if (workSchedule) {
@@ -162,7 +146,6 @@ export const AIPlanerPage = () => {
     return Array.from({ length: Math.max(1, endH - startH + 1) }, (_, i) => (startH + i).toString().padStart(2, '0') + ":00");
   }, [workSchedule, viewMode, baseDate]);
 
-  // 4. ТРАНСФОРМАЦІЯ ПЛАНІВ ДЛЯ СІТКИ
   const plannerTasks: PlannerTask[] = useMemo(() => {
     const mapCat = (t: string): "study" | "lab" | "work" | "personal" | "wellness" => {
       const type = t?.toLowerCase();
@@ -174,7 +157,7 @@ export const AIPlanerPage = () => {
     };
 
     return allPlans
-      .filter(p => p.time && p.time.includes(':'))
+      .filter(p => !p.completed && p.time && typeof p.time === 'string' && p.time.includes(':'))
       .map(p => {
         const [h, m] = p.time!.split(':').map(Number);
         const dur = (p.type === "Навчання" || p.type === "Лабораторна") ? 90 : 60;
@@ -190,14 +173,150 @@ export const AIPlanerPage = () => {
       });
   }, [allPlans]);
 
-  // 5. ТЕКСТ НАВІГАЦІЇ
-  const navText = useMemo(() => {
-    if (viewMode === "day") return { main: `${baseDate.getDate()} ${monthNames[baseDate.getMonth()]}`, sub: dayNamesFull[baseDate.getDay()] };
-    const start = currentWeekDays[0], end = currentWeekDays[6];
-    return { main: `${start.getDate()} ${monthNames[start.getMonth()].slice(0,3)} – ${end.getDate()} ${monthNames[end.getMonth()].slice(0,3)}`, sub: "Тиждень" };
-  }, [baseDate, viewMode, currentWeekDays]);
+  const unscheduledTasks = useMemo(() => {
+    const datesToCheck = viewMode === "day" 
+      ? [normalizeDate(`${baseDate.getDate()}-${baseDate.getMonth()}-${baseDate.getFullYear()}`)]
+      : currentWeekDays.map(d => normalizeDate(`${d.getDate()}-${d.getMonth()}-${d.getFullYear()}`));
 
-  // 6. ЛОГІКА ЧАТУ ТА МОДИФІКАЦІЇ ПЛАНІВ
+    return allPlans.filter(p => {
+      if (p.completed) return false;
+      const hasNoTime = !p.time || typeof p.time !== 'string' || !p.time.includes(':');
+      return hasNoTime && datesToCheck.includes(normalizeDate(p.date));
+    });
+  }, [allPlans, baseDate, viewMode, currentWeekDays]);
+
+  const overdueTasks = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return allPlans.filter(p => {
+      if (p.completed) return false; 
+      if (!p.date) return false;
+      const parts = p.date.split('-');
+      if (parts.length === 3) {
+        const planDate = new Date(Number(parts[2]), Number(parts[1]), Number(parts[0]));
+        planDate.setHours(0, 0, 0, 0);
+        return planDate < today; 
+      }
+      return false;
+    });
+  }, [allPlans]);
+
+const triggerAutoScheduling = useCallback(async (tasksToSchedule: Plan[], targetDateStr: string) => {
+  setIsAutoScheduling(true);
+  
+  const plansForTargetDay = allPlans.filter(p => !p.completed && normalizeDate(p.date) === targetDateStr);
+  const now = new Date();
+  const isToday = targetDateStr === normalizeDate(`${now.getDate()}-${now.getMonth()}-${now.getFullYear()}`);
+  const timeToPass = isToday ? now.toLocaleTimeString("uk-UA", { hour: '2-digit', minute: '2-digit' }) : "09:00";
+
+  try {
+    const res = await fetch(`${API_URL}/ai/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ 
+        message: `Службовий запит: оптимізуй розклад на ${targetDateStr}`, 
+        isAutoOptimize: true, 
+        tasksToSchedule: tasksToSchedule,
+        userId: userData?.id, 
+        workSchedule, 
+        realTime: timeToPass, 
+        realDate: targetDateStr, 
+        plansForToday: plansForTargetDay
+      })
+    });
+
+    const data = await res.json();
+    const incomingPlans = data.updatedPlansForToday || data.newPlans;
+    
+    if (incomingPlans && Array.isArray(incomingPlans)) {
+      const normalizedIncoming = incomingPlans.map((p: Plan) => ({ ...p, date: normalizeDate(p.date) }));
+      
+      setAllPlans(prev => {
+        const updated = [...prev];
+        normalizedIncoming.forEach((newP: Plan) => {
+          const index = updated.findIndex(oldP => String(oldP.id) === String(newP.id));
+          if (index !== -1) updated[index] = { ...updated[index], ...newP };
+          else updated.push(newP);
+        });
+        
+        setHasUnsavedChanges(true); 
+        return updated;
+      });
+    }
+  } catch (err) {
+    console.error("Помилка автоматичного планування:", err);
+    lastAutoProcessedRef.current = ""; 
+  } finally {
+    setIsAutoScheduling(false);
+  }
+}, [allPlans, userData, workSchedule]); 
+  const handleSilentOverdueScheduling = async () => {
+    setIsAutoScheduling(true);
+    const targetDateStr = normalizeDate(`${baseDate.getDate()}-${baseDate.getMonth()}-${baseDate.getFullYear()}`);
+    const plansForTargetDay = allPlans.filter(p => !p.completed && normalizeDate(p.date) === targetDateStr);
+    const now = new Date();
+    const timeToPass = now.toLocaleTimeString("uk-UA", { hour: '2-digit', minute: '2-digit' });
+
+    try {
+      const res = await fetch(`${API_URL}/ai/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          message: "Службовий запит", 
+          isAutoOptimize: true, 
+          userId: userData?.id, 
+          workSchedule, 
+          realTime: timeToPass, 
+          realDate: targetDateStr,
+          plansForToday: plansForTargetDay,
+          pastOverdue: overdueTasks 
+        })
+      });
+
+      const data = await res.json();
+      const incomingPlans = data.updatedPlans || data.updatedPlansForToday || data.newPlans;
+      
+      if (incomingPlans && Array.isArray(incomingPlans)) {
+        const normalizedIncoming = incomingPlans.map((p: Plan) => ({ ...p, date: normalizeDate(p.date) }));
+        setAllPlans(prev => {
+          const updated = [...prev];
+          normalizedIncoming.forEach((newP: Plan) => {
+            const index = updated.findIndex(oldP => String(oldP.id) === String(newP.id));
+            if (index !== -1) updated[index] = { ...updated[index], ...newP };
+            else updated.push(newP);
+          });
+          setHasUnsavedChanges(true); 
+          return updated;
+        });
+      }
+    } catch (err) {
+      console.error("Помилка фонового перенесення боргів:", err);
+    } finally {
+      setIsAutoScheduling(false);
+    }
+  };
+
+  useEffect(() => {
+    if (unscheduledTasks.length > 0 && !isAutoScheduling) {
+      const tasksByDate = unscheduledTasks.reduce((acc, task) => {
+        const d = normalizeDate(task.date);
+        if (!acc[d]) acc[d] = [];
+        acc[d].push(task);
+        return acc;
+      }, {} as Record<string, Plan[]>);
+
+      const firstDateToProcess = Object.keys(tasksByDate)[0];
+      const tasksForThisDate = tasksByDate[firstDateToProcess];
+
+      const fingerprint = `${firstDateToProcess}-${tasksForThisDate.map(p => p.id).join(',')}`;
+      
+      if (lastAutoProcessedRef.current !== fingerprint) {
+        lastAutoProcessedRef.current = fingerprint;
+        triggerAutoScheduling(tasksForThisDate, firstDateToProcess); 
+      }
+    }
+  }, [unscheduledTasks, isAutoScheduling, triggerAutoScheduling]);
+
   const handleSendMessage = async (customText?: string) => {
     const messageText = customText || inputValue;
     if (!messageText.trim() || isAiLoading) return;
@@ -207,12 +326,12 @@ export const AIPlanerPage = () => {
     setInputValue("");
     setIsAiLoading(true);
 
+    const targetDateStr = normalizeDate(`${baseDate.getDate()}-${baseDate.getMonth()}-${baseDate.getFullYear()}`);
+    const plansForTargetDay = allPlans.filter(p => !p.completed && normalizeDate(p.date) === targetDateStr);
+    
     const now = new Date();
-    const realTime = now.toLocaleTimeString("uk-UA", { hour: '2-digit', minute: '2-digit' });
-    const realDate = `${now.getDate()}-${now.getMonth()}-${now.getFullYear()}`;
-    const todayStr = normalizeDate(realDate);
-
-    const plansForToday = allPlans.filter(p => normalizeDate(p.date) === todayStr);
+    const isToday = targetDateStr === normalizeDate(`${now.getDate()}-${now.getMonth()}-${now.getFullYear()}`);
+    const timeToPass = isToday ? now.toLocaleTimeString("uk-UA", { hour: '2-digit', minute: '2-digit' }) : "09:00";
 
     try {
       const res = await fetch(`${API_URL}/ai/chat`, {
@@ -222,16 +341,18 @@ export const AIPlanerPage = () => {
           message: messageText, 
           userId: userData?.id, 
           workSchedule, 
-          realTime, 
-          realDate,
-          plansForToday
+          realTime: timeToPass, 
+          realDate: targetDateStr, 
+          plansForToday: plansForTargetDay,
+          allPlans: allPlans,
+          pastOverdue: overdueTasks 
         })
       });
 
       const data = await res.json();
       setMessages(prev => [...prev, { id: `ai-${Date.now()}`, role: "ai", text: data.reply }]);
 
-      const incomingPlans = data.updatedPlansForToday || data.newPlans;
+     const incomingPlans = data.updatedPlans || data.updatedPlansForToday || data.newPlans;
       if (incomingPlans && Array.isArray(incomingPlans)) {
         const normalizedIncoming = incomingPlans.map((p: Plan) => ({ ...p, date: normalizeDate(p.date) }));
         
@@ -239,67 +360,89 @@ export const AIPlanerPage = () => {
           const updated = [...prev];
           
           normalizedIncoming.forEach((newP: Plan) => {
-            const index = updated.findIndex(oldP => 
-              (oldP.id && newP.id && String(oldP.id) === String(newP.id)) || 
-              (oldP.text.toLowerCase() === newP.text.toLowerCase() && normalizeDate(oldP.date) === newP.date)
-            );
+            if (!newP.id || newP.id === "") {
+                newP.id = `gen-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+            }
 
+            const index = updated.findIndex(oldP => String(oldP.id) === String(newP.id));
             if (index !== -1) {
               updated[index] = { ...updated[index], ...newP };
             } else {
               updated.push(newP);
             }
           });
-
-          const nameKey = userData?.name || "user";
-          localforage.setItem(`unimind-plans-${nameKey}`, updated);
+          
+          setHasUnsavedChanges(true); 
           return updated;
         });
       }
+
+
     } catch {
-      setMessages(prev => [...prev, { id: `err-${Date.now()}`, role: "ai", text: "🔌 Помилка зв'язку з асистентом." }]);
+      setMessages(prev => [...prev, { id: `err-${Date.now()}`, role: "ai", text: "Помилка зв'язку з асистентом." }]);
     } finally { setIsAiLoading(false); }
   };
 
-  // 7. СИНХРОНІЗАЦІЯ З СЕРВЕРОМ ЗА КНОПКОЮ
   const handleSavePlansToServer = async () => {
     if (!userData?.id) return;
     setIsSaving(true);
     try {
+      const nameKey = userData.name || "user";
+      await localforage.setItem(`unimind-plans-${nameKey}`, allPlans);
+
       const res = await fetch(`${API_URL}/ai/save-plans`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: userData.id, plans: allPlans })
       });
+
       if (res.ok) {
-        alert("Плани успішно збережено та синхронізовано з календарем! ☁️");
-      } else {
-        alert("Помилка збереження планів.");
+        setHasUnsavedChanges(false);
+        setMessages(prev => [...prev, { id: `sys-save-${Date.now()}`, role: "ai", text: "Графік успішно затверджено та перенесено в Календар!" }]);
       }
     } catch {
       alert("Не вдалося підключитися до сервера для синхронізації.");
     } finally { setIsSaving(false); }
   };
 
-  // 8. ОЧИЩЕННЯ ІСТОРІЇ ЧАТУ
+  const handleDiscardChanges = async () => {
+    const isGuest = (await localforage.getItem("isGuest")) === "true";
+    const nameKey = isGuest ? "guest" : (userData?.name || "user");
+    
+    const savedPlans = await localforage.getItem<Plan[]>(`unimind-plans-${nameKey}`);
+    if (savedPlans) {
+      setAllPlans(savedPlans.map(p => ({ ...p, date: normalizeDate(p.date) })));
+    }
+    
+    lastAutoProcessedRef.current = ""; 
+    setHasUnsavedChanges(false);
+    setMessages(prev => [...prev, { id: `sys-discard-${Date.now()}`, role: "ai", text: "↩ Зміни скасовано. Графік повернуто до попереднього стану." }]);
+  };
+
   const handleClearHistory = async () => {
     if (!window.confirm("Очистити всю історію повідомлень з UniMind AI?")) return;
-    
     setMessages([{ id: `ai-init-${Date.now()}`, role: "ai", text: "Історію чату очищено. Готовий до нових завдань! ✨" }]);
     if (!userData?.id) return;
-
     try {
       await fetch(`${API_URL}/ai/clear-history`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: userData.id })
       });
-    } catch {
-      console.error("Не вдалося очистити історію на сервері");
-    }
+    } catch { console.error("Не вдалося очистити історію"); }
   };
 
-  const handleOptimizePlan = () => handleSendMessage("Оптимізуй мій графік: признач час справам без часу та заплануй прийоми їжі.");
+  const navText = useMemo(() => {
+    if (viewMode === "day") return { main: `${baseDate.getDate()} ${monthNames[baseDate.getMonth()]}`, sub: dayNamesFull[baseDate.getDay()] };
+    const start = currentWeekDays[0], end = currentWeekDays[6];
+    return { main: `${start.getDate()} ${monthNames[start.getMonth()].slice(0,3)} – ${end.getDate()} ${monthNames[end.getMonth()].slice(0,3)}`, sub: "Тиждень" };
+  }, [baseDate, viewMode, currentWeekDays]);
+
+  const shiftDate = (direction: -1 | 1) => {
+    const next = new Date(baseDate);
+    next.setDate(next.getDate() + (direction * (viewMode === "week" ? 7 : 1)));
+    setBaseDate(next);
+  };
 
   const getTaskStyle = (timeStart: string, timeEnd: string, isDay: boolean) => {
     const [startH, startM] = timeStart.split(':').map(Number);
@@ -319,14 +462,7 @@ export const AIPlanerPage = () => {
       default: return { icon: <User weight="fill" />, colorClass: "cat-personal" };
     }
   };
-
-  const shiftDate = (direction: -1 | 1) => {
-    const next = new Date(baseDate);
-    next.setDate(next.getDate() + (direction * (viewMode === "week" ? 7 : 1)));
-    setBaseDate(next);
-  };
-
-  return (
+ return (
     <div className="planner-container">
       <style>{`
         .cat-study { background: rgba(142, 194, 255, 0.85) !important; box-shadow: inset 4px 0 0 0 #5a9cf8; }
@@ -343,7 +479,11 @@ export const AIPlanerPage = () => {
         <div className="planner-header">
           <div className="planner-title-group">
             <h2 className="planner-title">Розумний Planer</h2>
-            <div className="ai-sync-badge"><Sparkle size={16} weight="fill" /><span>Синхронізовано</span></div>
+            {hasUnsavedChanges ? (
+               <div className="ai-sync-badge" style={{ background: '#fff0db', color: '#e68a00' }}><Sparkle size={16} weight="fill" /><span>Є незбережені зміни</span></div>
+            ) : (
+               <div className="ai-sync-badge"><Sparkle size={16} weight="fill" /><span>Синхронізовано</span></div>
+            )}
           </div>
           <div className="planner-controls">
             <div className="view-toggle-new">
@@ -361,7 +501,7 @@ export const AIPlanerPage = () => {
           </div>
         </div>
 
-        <div className="planner-grid-area">
+       <div className="planner-grid-area">
           <AnimatePresence mode="wait">
             {viewMode === "week" ? (
               <motion.div key="week" className="scrollable-area" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={{ height: '100%', overflowY: 'auto' }}>
@@ -390,7 +530,11 @@ export const AIPlanerPage = () => {
                       return (
                         <div key={`wk-col-${i}`} style={{ flex: 1, position: 'relative' }}>
                           {plannerTasks.filter(t => t.dateKey === dateStr).map((task, idx) => (
-                            <div key={`task-wk-${task.id || idx}-${idx}`} className={`${getCategoryInfo(task.category).colorClass} planner-task-card`} style={getTaskStyle(task.timeStart, task.timeEnd, false)}>
+                            <div 
+                              key={`task-week-${task.id || 'temp'}-${idx}-${dateStr}`} 
+                              className={`${getCategoryInfo(task.category).colorClass} planner-task-card`} 
+                              style={getTaskStyle(task.timeStart, task.timeEnd, false)}
+                            >
                               <span style={{ fontSize: '10px', fontWeight: 800, color: '#4a3e75' }}>{task.title}</span>
                             </div>
                           ))}
@@ -411,44 +555,49 @@ export const AIPlanerPage = () => {
                   </div>
                 ))}
                 <div style={{ position: 'absolute', top: '10px', left: '55px', right: 0, bottom: 0, pointerEvents: 'none' }}>
-                  {plannerTasks.filter(t => t.dateKey === normalizeDate(`${baseDate.getDate()}-${baseDate.getMonth()}-${baseDate.getFullYear()}`)).map((task, idx) => (
-                    <div key={`task-day-${task.id || idx}-${idx}`} className={`${getCategoryInfo(task.category).colorClass} day-task-card planner-task-card`} style={{ ...getTaskStyle(task.timeStart, task.timeEnd, true), display: 'flex', alignItems: 'center', padding: '0 20px', pointerEvents: 'auto' }}>
-                      <div style={{ fontSize: '20px', marginRight: '15px' }}>{getCategoryInfo(task.category).icon}</div>
-                      <div style={{ textAlign: 'left' }}>
-                        <div style={{ fontWeight: 800, fontSize: '15px', color: '#4a3e75' }}>{task.title}</div>
-                        <div style={{ fontSize: '12px', opacity: 0.7 }}>{task.timeStart} - {task.timeEnd}</div>
+                  {plannerTasks.filter(t => t.dateKey === normalizeDate(`${baseDate.getDate()}-${baseDate.getMonth()}-${baseDate.getFullYear()}`)).map((task, idx) => {
+                    const currentDayStr = normalizeDate(`${baseDate.getDate()}-${baseDate.getMonth()}-${baseDate.getFullYear()}`);
+                    return (
+                      <div 
+                        key={`task-day-${task.id || 'temp'}-${idx}-${currentDayStr}`} 
+                        className={`${getCategoryInfo(task.category).colorClass} day-task-card planner-task-card`} 
+                        style={{ ...getTaskStyle(task.timeStart, task.timeEnd, true), display: 'flex', alignItems: 'center', padding: '0 20px', pointerEvents: 'auto' }}
+                      >
+                        <div style={{ fontSize: '20px', marginRight: '15px' }}>{getCategoryInfo(task.category).icon}</div>
+                        <div style={{ textAlign: 'left' }}>
+                          <div style={{ fontWeight: 800, fontSize: '15px', color: '#4a3e75' }}>{task.title}</div>
+                          <div style={{ fontSize: '12px', opacity: 0.7 }}>{task.timeStart} - {task.timeEnd}</div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </motion.div>
             )}
           </AnimatePresence>
         </div>
 
-        <div className="ai-optimization-bar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div className="ai-opt-left">
-            <Sparkle size={28} weight="fill" color="#c1f9ff" />
-            <div><h4>AI-Оптимізація</h4><p>Бажаєш розставити завдання без часу та запланувати прийоми їжі?</p></div>
-          </div>
-          <div style={{ display: "flex", gap: "10px" }}>
-            <button 
-              className="details-btn" 
-              onClick={handleOptimizePlan} 
-              disabled={isAiLoading}
-              style={{ background: '#e4dbfa63', color: '#6133ca', border: '1px solid rgba(97, 51, 202, 0.3)', padding: '10px 20px', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}
-            >
-              {isAiLoading ? "Думаю..." : "Оптимізувати план ✨"}
-            </button>
-            <button 
-              className="save-plan-btn" 
-              onClick={handleSavePlansToServer} 
-              disabled={isSaving || isAiLoading}
-              style={{ background: '#9675e3', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}
-            >
-              {isSaving ? "Зберігаю..." : "Зберегти план ☁️"}
-            </button>
-          </div>
+        <div className="ai-optimization-bar" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "15px 20px", minHeight: "70px" }}>
+          <AnimatePresence>
+            {hasUnsavedChanges && (
+              <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} style={{ display: "flex", gap: "12px" }}>
+                <button 
+                  onClick={handleDiscardChanges} 
+                  disabled={isSaving || isAiLoading || isAutoScheduling}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'transparent', color: '#e63946', border: '1px solid rgba(230, 57, 70, 0.3)', padding: '10px 20px', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}
+                >
+                  <ArrowCounterClockwise size={18} weight="bold" /> Скасувати зміни
+                </button>
+                <button 
+                  onClick={handleSavePlansToServer} 
+                  disabled={isSaving || isAiLoading || isAutoScheduling}
+                  style={{ background: '#9675e3', color: '#fff', border: 'none', padding: '10px 24px', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 4px 15px rgba(150, 117, 227, 0.4)' }}
+                >
+                  {isSaving ? "Зберігаю..." : "Зберегти план ☁️"}
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </motion.div>
 
@@ -469,7 +618,8 @@ export const AIPlanerPage = () => {
         <div className="sidebar-chat scrollable-area">
           <AnimatePresence>
             {messages.map((msg, idx) => (
-              <motion.div key={`msg-${msg.id || idx}-${idx}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={msg.role === "ai" ? "ai-message-card" : "user-message-card"}>
+              <motion.div 
+key={`msg-${msg?.id ? msg.id : `temp-${idx}`}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={msg.role === "ai" ? "ai-message-card" : "user-message-card"}>
                 {msg.role === "ai" && <div className="ai-message-badge"><Sparkle size={14} weight="fill" /><span>UniMind AI</span></div>}
                 <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{msg.text}</p>
               </motion.div>
@@ -478,10 +628,40 @@ export const AIPlanerPage = () => {
             <div ref={chatEndRef} />
           </AnimatePresence>
         </div>
-        <div className="sidebar-input-area">
+        
+        <div className="sidebar-input-area" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {overdueTasks.length > 0 && (
+            <div style={{ background: '#fff0db', padding: '12px', borderRadius: '12px', fontSize: '12px', color: '#e68a00', display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: '1px solid rgba(230, 138, 0, 0.2)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <WarningCircle size={18} weight="bold" />
+                <span>Протерміновано справ: <strong style={{ fontSize: '14px' }}>{overdueTasks.length}</strong></span>
+              </div>
+              <button 
+                onClick={handleSilentOverdueScheduling}
+                disabled={isAiLoading || isAutoScheduling}
+                style={{ background: '#e68a00', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', transition: '0.2s' }}
+              >
+                {isAutoScheduling ? "Переношу..." : "Перенести розумно"}
+              </button>
+            </div>
+          )}
           <div className="input-box">
-            <input type="text" placeholder="Запитай про обід або плани..." value={inputValue} onChange={(e) => setInputValue(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSendMessage()} />
-            <button id="ai-send-trigger" className="send-btn" onClick={() => handleSendMessage()} disabled={isAiLoading}><PaperPlaneRight size={22} weight="fill" /></button>
+            <input 
+              type="text" 
+              placeholder="Запитай про обід або плани..." 
+              value={inputValue} 
+              onChange={(e) => setInputValue(e.target.value)} 
+              onKeyDown={e => e.key === "Enter" && handleSendMessage()} 
+              disabled={isAiLoading || isAutoScheduling} 
+            />
+            <button 
+              id="ai-send-trigger" 
+              className="send-btn" 
+              onClick={() => handleSendMessage()} 
+              disabled={isAiLoading || isAutoScheduling}
+            >
+              <PaperPlaneRight size={22} weight="fill" />
+            </button>
           </div>
         </div>
       </motion.div>

@@ -35,7 +35,6 @@ export const SignupPage: React.FC<SignupPageProps> = ({
 }) => {
   return (
     <div className="AuthPage">
-      {/* Фонове зображення залишається, воно задає атмосферу */}
       <img src="/images/login.png" className="LoginBack" alt="Background" />
       
       <div className="login-container">
@@ -48,7 +47,6 @@ export const SignupPage: React.FC<SignupPageProps> = ({
           <h1 className="title">Створіть свій акаунт</h1>
           <div className="account">
             
-            {/* Поле імені */}
             <div className="input-group">
               <label>Введіть ім'я користувача:</label>
               <div className="input-wrapper">
@@ -62,7 +60,6 @@ export const SignupPage: React.FC<SignupPageProps> = ({
               </div>
             </div>
 
-            {/* Поле пошти */}
             <div className="input-group">
               <label>Введіть електронну пошту:</label>
               <div className="input-wrapper">
@@ -76,7 +73,6 @@ export const SignupPage: React.FC<SignupPageProps> = ({
               </div>
             </div>
 
-            {/* Поле пароля */}
             <div className="input-group">
               <label>Введіть пароль:</label>
               <div className="input-wrapper">
@@ -93,7 +89,6 @@ export const SignupPage: React.FC<SignupPageProps> = ({
               </div>
             </div>
 
-            {/* Підтвердження пароля */}
             <div className="input-group">
               <label>Введіть пароль ще раз:</label>
               <div className="input-wrapper">
@@ -110,7 +105,6 @@ export const SignupPage: React.FC<SignupPageProps> = ({
               </div>
             </div>
 
-            {/* Повідомлення про помилку з анімацією трясіння */}
             <p className={`error ${error ? "visible" : ""} ${isShaking ? "shake-animation2" : ""}`}>
               {error || " "}
             </p>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import localforage from "localforage";
-import { motion } from "framer-motion"; 
+import { motion } from "framer-motion";
 
 interface Plan {
   id: number | string;
@@ -9,6 +9,7 @@ interface Plan {
   date: string;
   type: string;
   time?: string;
+  origin?: string;
 }
 
 interface UserData {
@@ -24,7 +25,7 @@ export const CalendarPage = () => {
   const [isGuest, setIsGuest] = useState(false);
   const [userData, setUserData] = useState<UserData | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
-  
+
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDayPlans, setSelectedDayPlans] = useState<number | null>(null);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
@@ -36,31 +37,40 @@ export const CalendarPage = () => {
   const [isAddingPlan, setIsAddingPlan] = useState(false);
   const [planType, setPlanType] = useState("Особисте");
   const [planTime, setPlanTime] = useState("");
-  
-  const [editingPlanId, setEditingPlanId] = useState<number | string | null>(null);
+
+  const [editingPlanId, setEditingPlanId] = useState<number | string | null>(
+    null,
+  );
   const [editText, setEditText] = useState("");
   const [editType, setEditType] = useState("Особисте");
   const [editTime, setEditTime] = useState("");
 
   const pickerRef = useRef<HTMLDivElement>(null);
   const categories = ["Особисте", "Навчання", "Лабораторна", "Робота"];
-  const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, "0"));
-  const minutes = Array.from({ length: 12 }, (_, i) => (i * 5).toString().padStart(2, "0"));
+  const hours = Array.from({ length: 24 }, (_, i) =>
+    i.toString().padStart(2, "0"),
+  );
+  const minutes = Array.from({ length: 12 }, (_, i) =>
+    (i * 5).toString().padStart(2, "0"),
+  );
 
   const viewYear = currentDate.getFullYear();
   const viewMonth = currentDate.getMonth();
-  const dateKey = selectedDayPlans !== null ? `${selectedDayPlans}-${viewMonth}-${viewYear}` : "";
+  const dateKey =
+    selectedDayPlans !== null
+      ? `${selectedDayPlans}-${viewMonth}-${viewYear}`
+      : "";
 
   useEffect(() => {
     const initCalendar = async () => {
-      const guestStatus = await localforage.getItem("isGuest") === "true";
+      const guestStatus = (await localforage.getItem("isGuest")) === "true";
       const storedUser = await localforage.getItem<UserData>("userData");
-      
+
       setIsGuest(guestStatus);
       setUserData(storedUser);
 
-      const storageKey = guestStatus 
-        ? "unimind-plans-guest" 
+      const storageKey = guestStatus
+        ? "unimind-plans-guest"
         : `unimind-plans-${storedUser?.name || "user"}`;
 
       const savedPlans = await localforage.getItem<Plan[]>(storageKey);
@@ -68,7 +78,11 @@ export const CalendarPage = () => {
         setPlans(savedPlans);
       }
 
-      if (!guestStatus && storedUser?.id && (!savedPlans || savedPlans.length === 0)) {
+      if (
+        !guestStatus &&
+        storedUser?.id &&
+        (!savedPlans || savedPlans.length === 0)
+      ) {
         try {
           const response = await fetch(`${API_URL}/profile/${storedUser.id}`);
           const dbData = await response.json();
@@ -90,16 +104,17 @@ export const CalendarPage = () => {
     if (isLoading) return;
 
     const syncWithStorage = async () => {
-      const storageKey = isGuest 
-        ? "unimind-plans-guest" 
+      const storageKey = isGuest
+        ? "unimind-plans-guest"
         : `unimind-plans-${userData?.name || "user"}`;
-      
+
       await localforage.setItem(storageKey, plans);
 
       if (!isGuest && userData?.id) {
         try {
           const semestersKey = `unimind-semesters-${userData.name}`;
-          const currentSemesters = await localforage.getItem(semestersKey) || [];
+          const currentSemesters =
+            (await localforage.getItem(semestersKey)) || [];
 
           await fetch(`${API_URL}/sync/all`, {
             method: "POST",
@@ -107,7 +122,7 @@ export const CalendarPage = () => {
             body: JSON.stringify({
               userId: userData.id,
               plans: plans,
-              semesters: currentSemesters
+              semesters: currentSemesters,
             }),
           });
         } catch (error) {
@@ -122,21 +137,29 @@ export const CalendarPage = () => {
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (pickerRef.current && !pickerRef.current.contains(event.target as Node)) {
+      if (
+        pickerRef.current &&
+        !pickerRef.current.contains(event.target as Node)
+      ) {
         setIsPickerOpen(false);
         setPickerStep("year");
       }
     };
-    if (isPickerOpen) document.addEventListener("mousedown", handleClickOutside);
+    if (isPickerOpen)
+      document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isPickerOpen]);
 
   const getCategoryClass = (type: string) => {
     switch (type) {
-      case "Навчання": return "cat-study";
-      case "Лабораторна": return "cat-lab";
-      case "Робота": return "cat-work";
-      default: return "cat-personal";
+      case "Навчання":
+        return "cat-study";
+      case "Лабораторна":
+        return "cat-lab";
+      case "Робота":
+        return "cat-work";
+      default:
+        return "cat-personal";
     }
   };
 
@@ -174,21 +197,29 @@ export const CalendarPage = () => {
   const saveEdit = (id: number | string) => {
     setPlans(
       plans.map((p) =>
-        p.id === id ? { ...p, text: editText, type: editType, time: editTime } : p
-      )
+        p.id === id
+          ? { ...p, text: editText, type: editType, time: editTime }
+          : p,
+      ),
     );
     setEditingPlanId(null);
   };
 
   const togglePlan = (id: number | string) =>
-    setPlans(plans.map((p) => (p.id === id ? { ...p, completed: !p.completed } : p)));
+    setPlans(
+      plans.map((p) => (p.id === id ? { ...p, completed: !p.completed } : p)),
+    );
 
   const deletePlan = (id: number | string) =>
     setPlans(plans.filter((p) => p.id !== id));
 
-  const monthLabel = new Intl.DateTimeFormat("uk-UA", { month: "long" }).format(currentDate);
+  const monthLabel = new Intl.DateTimeFormat("uk-UA", { month: "long" }).format(
+    currentDate,
+  );
   const allMonths = Array.from({ length: 12 }, (_, i) =>
-    new Intl.DateTimeFormat("uk-UA", { month: "long" }).format(new Date(2026, i, 1))
+    new Intl.DateTimeFormat("uk-UA", { month: "long" }).format(
+      new Date(2026, i, 1),
+    ),
   );
 
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
@@ -196,7 +227,8 @@ export const CalendarPage = () => {
   if (firstDayIndex === -1) firstDayIndex = 6;
   const weekDays = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"];
 
-  const changeMonth = (offset: number) => setCurrentDate(new Date(viewYear, viewMonth + offset, 1));
+  const changeMonth = (offset: number) =>
+    setCurrentDate(new Date(viewYear, viewMonth + offset, 1));
 
   const handleYearClick = (year: number) => {
     setTempYear(year);
@@ -218,13 +250,14 @@ export const CalendarPage = () => {
     );
   };
 
-  if (isLoading) return <div className="calendar-page" style={{ opacity: 0 }} />;
+  if (isLoading)
+    return <div className="calendar-page" style={{ opacity: 0 }} />;
 
   return (
-    <motion.div 
+    <motion.div
       className="calendar-page"
-      initial={{ opacity: 0 }} 
-      animate={{ opacity: 1 }} 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
       transition={{ duration: 0.3 }}
     >
       <div className="Calendar-message">
@@ -312,7 +345,7 @@ export const CalendarPage = () => {
                       (_, i) => new Date().getFullYear() + i,
                     ).map((y) => (
                       <div
-                        key={y}
+                        key={`yr-${y}`}
                         className={`year-item ${tempYear === y ? "active" : ""}`}
                         onClick={() => handleYearClick(y)}
                       >
@@ -326,7 +359,7 @@ export const CalendarPage = () => {
                   <div className="month-grid">
                     {allMonths.map((m, idx) => (
                       <div
-                        key={m}
+                        key={`m-${idx}`}
                         className={`month-item ${idx === viewMonth && tempYear === viewYear ? "current" : ""}`}
                         onClick={() => handleMonthClick(idx)}
                       >
@@ -353,7 +386,7 @@ export const CalendarPage = () => {
             }}
           >
             {weekDays.map((day) => (
-              <div className="week" key={day}>
+              <div className="week" key={`wday-${day}`}>
                 {day}
               </div>
             ))}
@@ -369,16 +402,16 @@ export const CalendarPage = () => {
 
               return (
                 <div
-                  key={dayNumber}
+                  key={`day-${dayNumber}`}
                   className={`calendar-day ${isToday(dayNumber) ? "selected" : ""}`}
                   onClick={() => setSelectedDayPlans(dayNumber)}
                 >
                   <span className="day-number">{dayNumber}</span>
                   {plansForThisDay.length > 0 && (
                     <div className="mini-plans-grid">
-                      {plansForThisDay.slice(0, 3).map((plan) => (
+                      {plansForThisDay.slice(0, 3).map((plan, idx) => (
                         <div
-                          key={plan.id}
+                          key={`mini-${plan.id || idx}`}
                           className={`mini-plan-item ${getCategoryClass(plan.type)}`}
                         >
                           <span className="mini-plan-text">{plan.text}</span>
@@ -421,9 +454,12 @@ export const CalendarPage = () => {
 
             <div className="plans-list-container">
               {dayPlans.length > 0
-                ? dayPlans.map((plan) =>
+                ? dayPlans.map((plan, idx) =>
                     editingPlanId === plan.id ? (
-                      <div key={plan.id} className="edit-plan-inline-block">
+                      <div
+                        key={`edit-${plan.id || idx}`}
+                        className="edit-plan-inline-block"
+                      >
                         <textarea
                           className="plans-textarea"
                           value={editText}
@@ -467,7 +503,7 @@ export const CalendarPage = () => {
                                     <p className="column-label">Години</p>
                                     {hours.map((h) => (
                                       <div
-                                        key={h}
+                                        key={`h-${h}`}
                                         className={`time-opt ${editTime.split(":")[0] === h ? "active" : ""}`}
                                         onClick={() =>
                                           setEditTime(
@@ -483,7 +519,7 @@ export const CalendarPage = () => {
                                     <p className="column-label">Хвилини</p>
                                     {minutes.map((m) => (
                                       <div
-                                        key={m}
+                                        key={`m-${m}`}
                                         className={`time-opt ${editTime.split(":")[1] === m ? "active" : ""}`}
                                         onClick={() =>
                                           setEditTime(
@@ -497,6 +533,7 @@ export const CalendarPage = () => {
                                   </div>
                                 </div>
                                 <button
+                                  type="button"
                                   className="time-done-btn"
                                   onClick={() => setActiveDropdown(null)}
                                 >
@@ -529,9 +566,9 @@ export const CalendarPage = () => {
                                 className="custom-dropdown-list downwards"
                                 onClick={(e) => e.stopPropagation()}
                               >
-                                {categories.map((cat) => (
+                                {categories.map((cat, i) => (
                                   <li
-                                    key={cat}
+                                    key={`cat-${cat}-${i}`}
                                     onClick={() => {
                                       setEditType(cat);
                                       setActiveDropdown(null);
@@ -562,7 +599,7 @@ export const CalendarPage = () => {
                       </div>
                     ) : (
                       <div
-                        key={plan.id}
+                        key={`plan-${plan.id || idx}`}
                         className={`plan-item-row ${getCategoryClass(plan.type)} ${plan.completed ? "is-done" : ""}`}
                       >
                         <div
@@ -639,7 +676,7 @@ export const CalendarPage = () => {
                             <p className="column-label">Години</p>
                             {hours.map((h) => (
                               <div
-                                key={h}
+                                key={`add-h-${h}`}
                                 className={`time-opt ${planTime.split(":")[0] === h ? "active" : ""}`}
                                 onClick={() =>
                                   setPlanTime(
@@ -655,7 +692,7 @@ export const CalendarPage = () => {
                             <p className="column-label">Хвилини</p>
                             {minutes.map((m) => (
                               <div
-                                key={m}
+                                key={`add-m-${m}`}
                                 className={`time-opt ${planTime.split(":")[1] === m ? "active" : ""}`}
                                 onClick={() =>
                                   setPlanTime(
@@ -702,9 +739,9 @@ export const CalendarPage = () => {
                         className="custom-dropdown-list upwards"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        {categories.map((cat) => (
+                        {categories.map((cat, i) => (
                           <li
-                            key={cat}
+                            key={`add-cat-${cat}-${i}`}
                             onClick={() => {
                               setPlanType(cat);
                               setActiveDropdown(null);

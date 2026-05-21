@@ -3,7 +3,7 @@ import React from "react";
 interface StartPageProps {
   setCurrentScreen: (screen: string) => void;
   clearInputs: () => void;
-  handleGuestEntry: () => Promise<void> | void; // Дозволяємо асинхронний виклик
+  handleGuestEntry: () => Promise<void> | void; 
 }
 
 export const StartPage: React.FC<StartPageProps> = ({ 
@@ -12,19 +12,16 @@ export const StartPage: React.FC<StartPageProps> = ({
   handleGuestEntry 
 }) => {
 
-  // Обробник для кнопки входу
   const handleLoginClick = (e: React.MouseEvent) => {
     e.preventDefault();
-    clearInputs(); // Очищаємо поля пароля/пошти перед переходом
+    clearInputs();
     setCurrentScreen("login");
   };
 
   return (
     <div className="startPage">
-      {/* Фонове зображення */}
       <img src="/images/back.png" className="bg-image" alt="Background" />
       
-      {/* Блок з логотипом */}
       <div className="logoBlock">
         <div className="logo">
           <div className="circle"></div>
@@ -32,12 +29,10 @@ export const StartPage: React.FC<StartPageProps> = ({
         </div>
       </div>
       
-      {/* Назва додатку */}
       <div className="NameBlock">
         <h1 className="Name">UniMind</h1>
       </div>
       
-      {/* Кнопки дій */}
       <div className="Auth">
         <button
           className="auth-btn2"
@@ -46,7 +41,6 @@ export const StartPage: React.FC<StartPageProps> = ({
           Вхід в систему
         </button>
 
-        {/* handleGuestEntry тепер очистить IndexedDB і налаштує статус гостя в App.tsx */}
         <button 
           className="auth-btn1" 
           onClick={() => handleGuestEntry()}

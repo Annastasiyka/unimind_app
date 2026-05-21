@@ -30,7 +30,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 }) => {
   return (
     <div className="AuthPage">
-      {/* Фонове зображення */}
       <img src="/images/login.png" className="LoginBack" alt="Background" />
       
       <div className="login-container">
@@ -44,7 +43,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           
           <div className="account" style={{ marginTop: "20px" }}>
             
-            {/* Введення пошти */}
             <div className="input-group">
               <label>Введіть електронну пошту:</label>
               <div className="input-wrapper">
@@ -58,7 +56,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               </div>
             </div>
 
-            {/* Введення пароля */}
             <div className="input-group">
               <label>Введіть пароль:</label>
               <div className="input-wrapper">
@@ -79,12 +76,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               </div>
             </div>
 
-            {/* Помилка з анімацією трясіння */}
             <p className={`error ${error ? "visible" : ""} ${isShaking ? "shake-animation2" : ""}`}>
               {error || " "}
             </p>
 
-            {/* Кнопка входу */}
             <button 
               className={`register-btn ${isShaking ? "shake-animation" : ""}`} 
               style={{ marginTop: "5px" }} 
@@ -93,7 +88,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               Увійти
             </button>
 
-            {/* Перехід на реєстрацію */}
             <h2 className="changeAccount"> 
               Не маєте акаунта?{" "}
               <a 

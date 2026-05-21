@@ -40,6 +40,7 @@ interface Plan {
   date: string;
   type: string;
   time?: string;
+  origin?: string;
 }
 
 interface DashboardProps {
@@ -323,18 +324,29 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
         const d = new Date(newTaskDeadline);
         const formattedDate = `${d.getDate()}-${d.getMonth()}-${d.getFullYear()}`;
         
-        // Визначаємо тип для календаря
         const calendarType = (newTaskType === "Лабораторні" || newTaskType === "Індивідуальна робота") 
           ? "Лабораторна" 
           : "Навчання";
           
-        const planText = `${activeSubject.name}: ${finalTaskName}`;
+        let planText = "";
+        const specialTypes = ["Проект", "Індивідуальна робота", "Лабораторні","Розрахункові роботи"];
         
-        // Перевіряємо чи такий план вже існує (щоб не створювати дублі при редагуванні)
+        if (specialTypes.includes(newTaskType)) {
+          let typeStr = newTaskType.toLowerCase();
+          if (newTaskType === "Лабораторні") typeStr = "лабораторної";
+          else if (newTaskType === "Проект") typeStr = "проекту";
+          else if (newTaskType === "Індивідуальна робота") typeStr = "індивідуальної роботи";
+          else if (newTaskType === "Розрахункові роботи") typeStr = "розрахункової роботи";
+
+          
+          planText = `Здача ${typeStr} з ${activeSubject.name} (${finalTaskName})`;
+        } else {
+          planText = `${newTaskType} з ${activeSubject.name}  (${finalTaskName})`;
+        }
+        
         const existingPlanIndex = existingPlans.findIndex(p => p.text === planText);
         
         if (existingPlanIndex !== -1) {
-          // Оновлюємо існуючий план
           existingPlans[existingPlanIndex].date = formattedDate;
           existingPlans[existingPlanIndex].type = calendarType;
         } else {
@@ -344,7 +356,8 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
           text: planText,
           completed: false,
           date: formattedDate,
-          type: calendarType
+          type: calendarType,
+          origin: "semester"
         });
         }
         
@@ -385,7 +398,6 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
         </div>
       )}
 
-      {/* МОБІЛЬНА ВЕРСІЯ */}
       {isMobile ? (
         <div className={`mu-container ${isArchived ? "is-archived-view" : ""}`}>
           <div className="mu-header">
@@ -455,19 +467,16 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
       {tasks.map(t => (
         <div key={t.id} className="mu-task-row">
           
-          {/* 1. НАЗВА (з автоматичним переносом тексту) */}
           <div className="col-name" style={{ marginLeft: "10px" }}>
             {t.name}
           </div>
 
-          {/* 2. СТАТУС */}
           <div className="col-status">
             <span className={`status-badge ${getStatusClass(t.status)}`}>
               {t.status}
             </span>
           </div>
 
-          {/* 3. БАЛИ (Інпут + Макс. бал) */}
           <div className="col-score" style={{ fontSize: '14px' }}>
             <input 
               type="text" 
@@ -489,7 +498,6 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
                 const val = e.target.value.replace(/[^0-9]/g, "");
                 const num = val === "" ? null : Math.min(Number(val), t.maxScore);
                 
-                // Оновлення списку предметів
                 const updated = subjects.map(subj => 
                   subj.id === s.id ? { 
                     ...subj, 
@@ -508,7 +516,6 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
             <span style={{ opacity: 0.6, marginLeft: '2px' }}>/ {t.maxScore}</span>
           </div>
 
-          {/* 4. ДІЇ (Олівець та Кошик) */}
           <div className="mu-task-actions">
             {!isArchived && (
               <>
@@ -571,7 +578,6 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
           </div>
         </div>
       ) : (
-        // ДЕСКТОПНА ВЕРСІЯ (Дві панелі)
         <div className={`dashboard-grid desktop-view ${isArchived ? "is-archived-view" : ""}`}>
           <div className="dash-left-panel">
             <div className="dash-panel-header">
@@ -653,7 +659,6 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
         </div>
       )}
 
-      {/* --- МОДАЛЬНІ ВІКНА --- */}
       <AnimatePresence>
         {(isSubjectModalOpen || isTaskModalOpen) && (
           <div className="sem-modal-overlay" onClick={() => { setIsSubjectModalOpen(false); setIsTaskModalOpen(false); setIsTypeDropdownOpen(false); setEditingSubjectId(null); setEditingTaskId(null); setErrorMsg(""); }}>

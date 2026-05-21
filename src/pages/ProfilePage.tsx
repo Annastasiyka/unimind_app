@@ -1,4 +1,4 @@
-import { motion } from "framer-motion"; // Тільки додаємо анімації
+import { motion } from "framer-motion"; 
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faUserGraduate } from "@fortawesome/free-solid-svg-icons";
 import React, { useState, useRef, useEffect } from "react";
@@ -7,7 +7,6 @@ import { Clock, User, Shield, Pencil, ChevronDown, LogOut, Check, Eye, EyeOff, L
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
-// --- ІНТЕРФЕЙСИ ---
 interface UserData {
   id: number;
   name: string;
@@ -28,7 +27,6 @@ const hours = Array.from({ length: 24 }, (_, i) =>
   i < 10 ? `0${i}:00` : `${i}:00`,
 );
 
-// --- ДОПОМІЖНІ ФУНКЦІЇ ---
 const resizeAvatar = (base64Str: string): Promise<string> => {
   return new Promise((resolve) => {
     const img = new Image();
@@ -54,7 +52,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
   handleLogout,
   setCurrentScreen,
 }) => {
-  // --- СТАНИ ---
   const [isLoading, setIsLoading] = useState(true); // Для контролю плавності
   const [isGuest, setIsGuest] = useState<boolean>(false);
   const [userName, setUserName] = useState("");
@@ -75,12 +72,10 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [isEditingName, setIsEditingName] = useState(false);
 
-  // --- ІНІЦІАЛІЗАЦІЯ ---
   useEffect(() => {
     const initProfile = async () => {
       const guestStatus = await localforage.getItem("isGuest") === "true";
@@ -114,12 +109,11 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
           console.error("Помилка:", error);
         }
       }
-      setIsLoading(false); // Все завантажили — вмикаємо видимість
+      setIsLoading(false); 
     };
     initProfile();
   }, []);
 
-  // --- ФУНКЦІЇ ЗБЕРЕЖЕННЯ --- (Твій оригінальний код без змін)
   const saveWorkSchedule = async (newTimes: { [key: string]: string }, newActiveDays: { [key: string]: boolean }) => {
     const nameKey = isGuest ? "Гість" : userName;
     await localforage.setItem(`unimind-work-times-${nameKey}`, newTimes);
@@ -181,7 +175,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
     } catch { setPasswordMessage("Сервер недоступний"); }
   };
 
-  // --- ОБРОБНИКИ ---
   const handlePhotoClick = () => fileInputRef.current?.click();
   const handleNameEditClick = () => { setIsEditingName(true); setTimeout(() => nameInputRef.current?.focus(), 0); };
   const handleNameSave = () => { setIsEditingName(false); saveUserData(userName, avatar); };
@@ -214,7 +207,6 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
 
   const days = ["Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця", "Субота", "Неділя"];
 
-  // Поки вантажиться — невидимий блок, щоб не було дрижання
   if (isLoading) return <div className="profile-container" style={{ opacity: 0 }} />;
 
   return (
