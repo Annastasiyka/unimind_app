@@ -9,7 +9,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-        maximumFileSizeToCacheInBytes: 6000000 
+        maximumFileSizeToCacheInBytes: 6000000, 
+        navigateFallback: '/index.html'
       },
       manifest: {
         name: "Unimind",
@@ -21,13 +22,13 @@ export default defineConfig({
         theme_color: "#968aff",      
         icons: [
           {
-            src: "/images/icon_entry.png",
-            sizes: "192x192",
+            src: "/images/entry.png",
+            sizes: "512x512",
             type: "image/png"
           },
           {
             src: "/images/icon_download.png",
-            sizes: "512x512",
+            sizes: "192x192",
             type: "image/png",
             purpose: "any maskable"
           }

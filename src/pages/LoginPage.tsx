@@ -83,10 +83,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             <button 
               className={`register-btn ${isShaking ? "shake-animation" : ""}`} 
               style={{ marginTop: "5px" }} 
-              onClick={handleLogin}
+              onClick={() => {
+                if (!navigator.onLine) {
+                  alert("Вхід в акаунт недоступний в офлайн-режимі. Будь ласка, підключіться до мережі.");
+                  return;
+                }
+                handleLogin();
+              }}
             >
               Увійти
             </button>
+            
 
             <h2 className="changeAccount"> 
               Не маєте акаунта?{" "}

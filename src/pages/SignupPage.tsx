@@ -111,7 +111,13 @@ export const SignupPage: React.FC<SignupPageProps> = ({
 
             <button 
               className={`register-btn ${isShaking ? "shake-animation" : ""}`} 
-              onClick={handlRegister}
+              onClick={() => {
+                if (!navigator.onLine) {
+                  alert("Реєстрація недоступна в офлайн-режимі. Будь ласка, підключіться до мережі.");
+                  return;
+                }
+                handlRegister();
+              }}
             >
               Зареєструватися
             </button>

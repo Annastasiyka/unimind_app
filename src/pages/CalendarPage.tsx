@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import localforage from "localforage";
 import { motion } from "framer-motion";
 
-// 1. ОНОВЛЕНИЙ ІНТЕРФЕЙС ПЛАНУ
 interface Plan {
   id: number | string;
   text: string;
@@ -11,9 +10,11 @@ interface Plan {
   type: string;
   time?: string;
   origin?: string;
-  taskId?: string;      // Прив'язка до завдання в семестрі
-  subjectId?: string;   // Прив'язка до предмета в семестрі
-  maxScore?: number;    // Максимальний бал
+  taskId?: string;      
+  subjectId?: string;   
+  maxScore?: number;    
+  updatedAt?: number; 
+  isDeleted?: boolean; 
 }
 
 interface UserData {
@@ -22,7 +23,6 @@ interface UserData {
   email: string;
 }
 
-// 2. ДОДАНІ ІНТЕРФЕЙСИ СЕМЕСТРУ ДЛЯ TYPESCRIPT (щоб уникнути помилок any)
 interface Task {
   id: string;
   name: string;
@@ -82,6 +82,27 @@ export const CalendarPage = () => {
 const viewMonth = currentDate.getMonth();
 const dateKey = selectedDayPlans !== null ? `${selectedDayPlans}-${viewMonth + 1}-${viewYear}` : "";
 
+const mergePlans = (local: Plan[], server: Plan[]): Plan[] => {
+  const mergedMap = new Map<string | number, Plan>();
+
+  local.forEach(plan => mergedMap.set(plan.id, plan));
+
+  server.forEach(serverPlan => {
+    const localPlan = mergedMap.get(serverPlan.id);
+    if (!localPlan) {
+      mergedMap.set(serverPlan.id, serverPlan);
+    } else {
+      const localTime = localPlan.updatedAt || 0;
+      const serverTime = serverPlan.updatedAt || 0;
+      if (serverTime > localTime) {
+        mergedMap.set(serverPlan.id, serverPlan);
+      }
+    }
+  });
+
+  return Array.from(mergedMap.values());
+};
+
 useEffect(() => {
     const initCalendar = async () => {
       const guestStatus = (await localforage.getItem("isGuest")) === "true";
@@ -94,29 +115,29 @@ useEffect(() => {
         ? "unimind-plans-guest"
         : `unimind-plans-${storedUser?.name || "user"}`;
 
-      const savedPlans = await localforage.getItem<Plan[]>(storageKey);
-      if (savedPlans) {
-        setPlans(savedPlans);
-      }
+      let savedPlans = (await localforage.getItem<Plan[]>(storageKey)) || [];
 
-      if (!guestStatus && storedUser?.id && (!savedPlans || savedPlans.length === 0)) {
+      if (!guestStatus && storedUser?.id && navigator.onLine) {
         try {
           const response = await fetch(`${API_URL}/profile/${storedUser.id}`);
-          const dbData = await response.json();
-          if (response.ok && dbData.plans) {
-            setPlans(dbData.plans);
-            await localforage.setItem(storageKey, dbData.plans);
+          if (response.ok) {
+            const dbData = await response.json();
+            if (dbData.plans) {
+              savedPlans = mergePlans(savedPlans, dbData.plans);
+              await localforage.setItem(storageKey, savedPlans);
+            }
           }
         } catch (error) {
           console.error("Помилка завантаження планів з сервера:", error);
         }
       }
+
+      setPlans(savedPlans);
       setTimeout(() => setIsLoading(false), 100);
     };
 
     initCalendar();
 
-    // ДОДАНО: Календар слухає, чи не змінив щось Планер (ШІ)
     const handleExternalUpdate = async () => {
       const guestStatus = (await localforage.getItem("isGuest")) === "true";
       const storedUser = await localforage.getItem<UserData>("userData");
@@ -200,15 +221,15 @@ useEffect(() => {
     }
   };
 
-  const dayPlans = plans
-    .filter((p) => p.date === dateKey)
+const dayPlans = plans
+    .filter((p) => p.date === dateKey && !p.isDeleted) 
     .sort((a, b) => {
       if (a.completed !== b.completed) return a.completed ? 1 : -1;
       if (a.time && b.time) return a.time.localeCompare(b.time);
       return 0;
     });
 
-  const addPlan = () => {
+const addPlan = () => {
     if (!newPlanText.trim()) return;
     const plan: Plan = {
       id: Date.now(),
@@ -217,11 +238,14 @@ useEffect(() => {
       date: dateKey,
       type: planType,
       time: planTime || undefined,
+      updatedAt: Date.now(),
     };
     setPlans([...plans, plan]);
     setNewPlanText("");
     setPlanTime("");
     setIsAddingPlan(false);
+
+    window.dispatchEvent(new CustomEvent("unimind-data-changed", { detail: { id: plan.id.toString() } }));
   };
 
   const startEditing = (plan: Plan) => {
@@ -234,21 +258,35 @@ useEffect(() => {
   const saveEdit = (id: number | string) => {
     setPlans(
       plans.map((p) =>
-        p.id === id ? { ...p, text: editText, type: editType, time: editTime } : p,
+        p.id === id ? { ...p, text: editText, type: editType, time: editTime, updatedAt: Date.now() } : p, 
       ),
     );
     setEditingPlanId(null);
   };
 
-  // 3. ОНОВЛЕНА ЛОГІКА: TOGGLE PLAN + СИНХРОНІЗАЦІЯ ОЦІНОК СЕМЕСТРУ
-  const togglePlan = async (id: number | string) => {
+ const togglePlan = async (id: number | string) => {
     const planToToggle = plans.find((p) => p.id === id);
     if (!planToToggle) return;
 
     const newCompleted = !planToToggle.completed;
     
-    setPlans(plans.map((p) => (p.id === id ? { ...p, completed: newCompleted } : p)));
+    // 1. Оновлюємо стан для Календаря
+    const updatedPlans = plans.map((p) => (p.id === id ? { ...p, completed: newCompleted, updatedAt: Date.now() } : p));
+    setPlans(updatedPlans);
 
+    // 2. МИТТЄВЕ ЗБЕРЕЖЕННЯ В БАЗУ (щоб Планер відразу це побачив)
+    try {
+      const guestStatus = (await localforage.getItem("isGuest")) === "true";
+      const storedUser = await localforage.getItem<UserData>("userData");
+      const storageKey = guestStatus ? "unimind-plans-guest" : `unimind-plans-${storedUser?.name || "user"}`;
+      
+      await localforage.setItem(storageKey, updatedPlans);
+      window.dispatchEvent(new Event("plansUpdated"));
+    } catch (err) {
+      console.error("Помилка миттєвого збереження планів:", err);
+    }
+
+    // 3. Синхронізація з Семестром
     if (planToToggle.origin === "semester" && planToToggle.taskId && planToToggle.subjectId) {
       try {
         const guestStatus = (await localforage.getItem("isGuest")) === "true";
@@ -303,6 +341,7 @@ useEffect(() => {
 
         if (isChanged) {
           await localforage.setItem(semestersKey, updatedSemesters);
+          window.dispatchEvent(new Event("semestersUpdated")); // Кричимо семестру оновитися
         }
       } catch (err) {
         console.error("Помилка синхронізації оцінки з семестром:", err);
@@ -310,15 +349,25 @@ useEffect(() => {
     }
   };
 
-  // --- ОНОВЛЕНА ФУНКЦІЯ ВИДАЛЕННЯ: ОЧИЩАЄ ТАКОЖ І ЗВ'ЯЗОК У СЕМЕСТРАХ ---
   const deletePlan = async (id: number | string) => {
     const planToDelete = plans.find((p) => p.id === id);
     if (!planToDelete) return;
 
-    // Видаляємо з локального стейту календаря
-    setPlans(plans.filter((p) => p.id !== id));
+    // М'яке видалення
+    const updatedPlans = plans.map(p => p.id === id ? { ...p, isDeleted: true, updatedAt: Date.now() } : p);
+    setPlans(updatedPlans);
 
-    // Якщо це системне завдання з дедлайном із семестру
+    // МИТТЄВЕ ЗБЕРЕЖЕННЯ В БАЗУ
+    try {
+      const guestStatus = (await localforage.getItem("isGuest")) === "true";
+      const storedUser = await localforage.getItem<UserData>("userData");
+      const storageKey = guestStatus ? "unimind-plans-guest" : `unimind-plans-${storedUser?.name || "user"}`;
+      await localforage.setItem(storageKey, updatedPlans);
+      window.dispatchEvent(new Event("plansUpdated"));
+    } catch (err) {
+      console.error("Помилка збереження при видаленні:", err);
+    }
+
     if (planToDelete.origin === "semester" && planToDelete.taskId && planToDelete.subjectId) {
       try {
         const guestStatus = (await localforage.getItem("isGuest")) === "true";
@@ -328,7 +377,6 @@ useEffect(() => {
         const semesters: Semester[] = (await localforage.getItem(semestersKey)) || [];
         let isChanged = false;
 
-        // Повертаємо оцінку до початкового стану (null) та скидаємо статус
         const updatedSemesters = semesters.map((sem) => ({
           ...sem,
           subjects: sem.subjects.map((subj) => {
@@ -340,8 +388,8 @@ useEffect(() => {
                     isChanged = true;
                     return {
                       ...task,
-                      score: null, // Скидаємо бали
-                      status: task.deadline ? "Має дедлайн" : "В процесі" // Повертаємо статус
+                      score: null, 
+                      status: task.deadline ? "Має дедлайн" : "В процесі" 
                     };
                   }
                   return task;
@@ -354,6 +402,7 @@ useEffect(() => {
 
         if (isChanged) {
           await localforage.setItem(semestersKey, updatedSemesters);
+          window.dispatchEvent(new Event("semestersUpdated"));
         }
       } catch (err) {
         console.error("Помилка при скиданні зв'язаного завдання з семестру:", err);
@@ -540,7 +589,7 @@ useEffect(() => {
              const dayNumber = i + 1;
 const dateStr = `${dayNumber}-${viewMonth + 1}-${viewYear}`;
               const plansForThisDay = plans
-                .filter((p) => p.date === dateStr && !p.completed)
+                .filter((p) => p.date === dateStr && !p.completed && !p.isDeleted) 
                 .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
 
               return (

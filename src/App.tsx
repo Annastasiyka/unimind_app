@@ -82,6 +82,7 @@ interface NotificationItem {
   timeRemaining: string;
   type: "task" | "plan";
   rawDate: Date;
+  isExpired: boolean;
 }
 
 function App() {
@@ -158,15 +159,28 @@ function App() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  const fetchNotifications = useCallback(async () => {
+  const handleClearNotifications = async () => {
+    const storageName = name === "Гість" ? "guest" : name;
+    const dismissedKey = `dismissed-notifs-${storageName}`;
+    const dismissedIds = (await localforage.getItem<string[]>(dismissedKey)) || [];
+
+    const currentIds = notifications.map(n => n.id);
+    const newDismissed = [...new Set([...dismissedIds, ...currentIds])];
+    
+    await localforage.setItem(dismissedKey, newDismissed);
+    setNotifications([]); 
+  };
+
+const fetchNotifications = useCallback(async () => {
     if (!name) return [];
     const now = new Date();
     const newNotifs: NotificationItem[] = [];
     const storageName = name === "Гість" ? "guest" : name;
 
-    const semesters = await localforage.getItem<Semester[]>(
-      `unimind-semesters-${storageName}`
-    );
+    const dismissedKey = `dismissed-notifs-${storageName}`;
+    const dismissedIds = (await localforage.getItem<string[]>(dismissedKey)) || [];
+
+    const semesters = await localforage.getItem<Semester[]>(`unimind-semesters-${storageName}`);
     
     if (semesters) {
       const todayDateOnly = new Date();
@@ -182,98 +196,66 @@ function App() {
               const diffTime = deadlineDate.getTime() - todayDateOnly.getTime();
               const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
 
-              if (diffDays > 1 && diffDays <= 5) {
-                newNotifs.push({
-                  id: `task-${task.id}-5d`,
-                  title: "Наближається дедлайн!",
-                  message: `${subj.name}: ${task.name}`,
-                  timeRemaining: `Залишилось: ${diffDays} дн.`,
-                  type: "task",
-                  rawDate: deadlineDate,
-                });
-              } else if (diffDays === 1) {
-                newNotifs.push({
-                  id: `task-${task.id}-1d`,
-                  title: "Увага! Дедлайн ЗАВТРА",
-                  message: `${subj.name}: ${task.name}`,
-                  timeRemaining: "Залишився 1 день!",
-                  type: "task",
-                  rawDate: deadlineDate,
-                });
-              } else if (diffDays === 0) {
-                newNotifs.push({
-                  id: `task-${task.id}-0d`,
-                  title: "Увага! Дедлайн СЬОГОДНІ",
-                  message: `${subj.name}: ${task.name}`,
-                  timeRemaining: "Терміново!",
-                  type: "task",
-                  rawDate: deadlineDate,
-                });
-              } else if (diffDays < 0) {
-                newNotifs.push({
-                  id: `task-${task.id}-overdue`,
-                  title: "Дедлайн ПРОПУЩЕНО",
-                  message: `${subj.name}: ${task.name}`,
-                  timeRemaining: `Протерміновано на ${Math.abs(diffDays)} дн.`,
-                  type: "task",
-                  rawDate: deadlineDate,
-                });
+              let notif: NotificationItem | null = null;
+              const id5d = `task-${task.id}-5d`;
+              const id1d = `task-${task.id}-1d`;
+              const id0d = `task-${task.id}-0d`;
+              const idOverdue = `task-${task.id}-overdue`;
+
+              if (diffDays > 1 && diffDays <= 5 && !dismissedIds.includes(id5d)) {
+                notif = { id: id5d, title: "Наближається дедлайн!", message: `${subj.name}: ${task.name}`, timeRemaining: `Залишилось: ${diffDays} дн.`, type: "task", rawDate: deadlineDate, isExpired: false };
+              } else if (diffDays === 1 && !dismissedIds.includes(id1d)) {
+                notif = { id: id1d, title: "Увага! Дедлайн ЗАВТРА", message: `${subj.name}: ${task.name}`, timeRemaining: "Залишився 1 день!", type: "task", rawDate: deadlineDate, isExpired: false };
+              } else if (diffDays === 0 && !dismissedIds.includes(id0d)) {
+                notif = { id: id0d, title: "Увага! Дедлайн СЬОГОДНІ", message: `${subj.name}: ${task.name}`, timeRemaining: "Терміново!", type: "task", rawDate: deadlineDate, isExpired: false };
+              } else if (diffDays < 0 && !dismissedIds.includes(idOverdue)) {
+                notif = { id: idOverdue, title: "Дедлайн ПРОПУЩЕНО", message: `${subj.name}: ${task.name}`, timeRemaining: `Протерміновано на ${Math.abs(diffDays)} дн.`, type: "task", rawDate: deadlineDate, isExpired: true };
               }
+
+              if (notif) newNotifs.push(notif);
             }
           });
         });
       });
     }
 
-    const plans = await localforage.getItem<Plan[]>(
-      `unimind-plans-${storageName}`
-    );
+    const plans = await localforage.getItem<Plan[]>(`unimind-plans-${storageName}`);
     
     if (plans) {
       plans.forEach((plan) => {
         if (!plan.completed && plan.date && plan.time) {
           const parts = plan.date.split("-");
           if (parts.length === 3) {
-            const planDate = new Date(
-              Number(parts[2]),
-              Number(parts[1]), 
-              Number(parts[0])
-            );
+            const planDate = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
             const [hours, minutes] = plan.time.split(":");
             planDate.setHours(Number(hours), Number(minutes), 0, 0);
 
             const diffTime = planDate.getTime() - now.getTime();
             const diffHours = diffTime / (1000 * 60 * 60);
+            
+            const id24h = `plan-${plan.id}-24h`;
+            const idPassed = `plan-${plan.id}-passed`;
 
-            if (diffHours > 0 && diffHours <= 24) {
-              newNotifs.push({
-                id: `plan-${plan.id}-24h`,
-                title: "Запланована подія",
-                message: plan.text,
-                timeRemaining: `Через ${Math.ceil(diffHours)} год. (${plan.time})`,
-                type: "plan",
-                rawDate: planDate,
-              });
-            } else if (diffHours <= 0 && diffHours > -24) {
-              newNotifs.push({
-                id: `plan-${plan.id}-passed`,
-                title: "Час виконання минув",
-                message: plan.text,
-                timeRemaining: `Було о ${plan.time}`,
-                type: "plan",
-                rawDate: planDate,
-              });
+            if (diffHours > 0 && diffHours <= 24 && !dismissedIds.includes(id24h)) {
+              newNotifs.push({ id: id24h, title: "Запланована подія", message: plan.text, timeRemaining: `Через ${Math.ceil(diffHours)} год. (${plan.time})`, type: "plan", rawDate: planDate, isExpired: false });
+            } else if (diffHours <= 0 && diffHours > -24 && !dismissedIds.includes(idPassed)) {
+              newNotifs.push({ id: idPassed, title: "Час виконання минув", message: plan.text, timeRemaining: `Було о ${plan.time}`, type: "plan", rawDate: planDate, isExpired: true });
             }
           }
         }
       });
     }
 
-    newNotifs.sort((a, b) => a.rawDate.getTime() - b.rawDate.getTime());
+    // Сортування: спочатку НЕ протерміновані (ближчі до зараз), потім протерміновані
+    newNotifs.sort((a, b) => {
+      if (a.isExpired !== b.isExpired) return a.isExpired ? 1 : -1; 
+      return a.rawDate.getTime() - b.rawDate.getTime();
+    });
+    
     return newNotifs;
   }, [name]);
 
-  useEffect(() => {
+useEffect(() => {
     let isMounted = true;
 
     const loadNotifications = async () => {
@@ -285,10 +267,36 @@ function App() {
 
     loadNotifications();
 
+    // Створюємо слухача, який реагуватиме на зміни даних у дочірніх компонентах
+    const handleDataUpdate = async (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const changedItemId = customEvent.detail?.id; 
+      if (changedItemId) {
+        const storageName = name === "Гість" ? "guest" : name;
+        const dismissedKey = `dismissed-notifs-${storageName}`;
+        let dismissedIds = (await localforage.getItem<string[]>(dismissedKey)) || [];
+
+        const originalLength = dismissedIds.length;
+        dismissedIds = dismissedIds.filter(id => !id.includes(changedItemId));
+
+        if (originalLength !== dismissedIds.length) {
+          await localforage.setItem(dismissedKey, dismissedIds);
+        }
+      }
+
+      if (isMounted) {
+        const freshData = await fetchNotifications();
+        setNotifications(freshData);
+      }
+    };
+
+    window.addEventListener("unimind-data-changed", handleDataUpdate);
+
     return () => {
       isMounted = false;
+      window.removeEventListener("unimind-data-changed", handleDataUpdate);
     };
-  }, [currentScreen, fetchNotifications]);
+  }, [currentScreen, fetchNotifications, name]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -356,6 +364,8 @@ function App() {
     };
   }, [currentScreen]);
 
+
+  
   const populateLocalStorageFromDB = async (user: UserData) => {
     if (user.semesters)
       await localforage.setItem(
@@ -422,7 +432,24 @@ function App() {
     }
   };
 
-  const finalizeRegistration = async (sync: boolean) => {
+  useEffect(() => {
+    const handleOnline = async () => {
+      console.log("Відновлено з'єднання! Синхронізуємо дані...");
+      const isGuest = await localforage.getItem("isGuest");
+      
+      if (isGuest !== "true") {
+        const savedUser = await localforage.getItem<UserData>("userData");
+        if (savedUser?.id && savedUser?.name) {
+          await syncWithBackend(savedUser.id, savedUser.name);
+        }
+      }
+    };
+
+    window.addEventListener("online", handleOnline);
+    return () => window.removeEventListener("online", handleOnline);
+  }, []);
+
+const finalizeRegistration = async (sync: boolean) => {
     const savedData = await localforage.getItem<UserData>("userData");
     const guestKeys = [
       "unimind-plans-guest",
@@ -435,6 +462,21 @@ function App() {
       if (sync) {
         await migrateAllGuestData(savedData.name);
         await syncWithBackend(savedData.id, savedData.name);
+        
+        // ДОДАНО: Автоматичне очищення історії чату після злиття даних
+        try {
+          await fetch(`${API_URL}/ai/clear-history`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId: savedData.id })
+          });
+        } catch (err) {
+          console.error("Не вдалося очистити чат при міграції:", err);
+        }
+
+        window.dispatchEvent(new Event("plansUpdated"));
+        window.dispatchEvent(new Event("semestersUpdated"));
+        window.dispatchEvent(new Event("scheduleUpdated"));
       } else {
         for (const k of guestKeys) await localforage.removeItem(k);
       }
@@ -459,6 +501,20 @@ function App() {
       if (sync) {
         await migrateAllGuestData(savedData.name);
         await syncWithBackend(savedData.id, savedData.name);
+        
+        try {
+          await fetch(`${API_URL}/ai/clear-history`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId: savedData.id })
+          });
+        } catch (err) {
+          console.error("Не вдалося очистити чат при міграції:", err);
+        }
+
+        window.dispatchEvent(new Event("plansUpdated"));
+        window.dispatchEvent(new Event("semestersUpdated"));
+        window.dispatchEvent(new Event("scheduleUpdated"));
       } else {
         for (const k of guestKeys) await localforage.removeItem(k);
       }
@@ -535,12 +591,13 @@ function App() {
 
       if (response.ok) {
         await localforage.setItem("userData", data.user);
-        const guestData = await localforage.getItem<Semester[]>(
-          "unimind-semesters-guest",
-        );
+        const guestSemesters = await localforage.getItem<Semester[]>("unimind-semesters-guest");
+        const guestPlans = await localforage.getItem<Plan[]>("unimind-plans-guest");
         const isGuest = await localforage.getItem("isGuest");
 
-        if (isGuest === "true" && guestData && guestData.length > 0) {
+        const hasGuestData = (guestSemesters && guestSemesters.length > 0) || (guestPlans && guestPlans.length > 0);
+
+        if (isGuest === "true" && hasGuestData) {
           setSyncType("register");
           setShowSyncModal(true);
         } else {
@@ -580,12 +637,13 @@ function App() {
         setName(data.user.name);
         setAvatar(data.user.avatar || null);
 
-        const guestData = await localforage.getItem<Semester[]>(
-          "unimind-semesters-guest",
-        );
+        const guestSemesters = await localforage.getItem<Semester[]>("unimind-semesters-guest");
+        const guestPlans = await localforage.getItem<Plan[]>("unimind-plans-guest");
         const isGuest = await localforage.getItem("isGuest");
 
-        if (isGuest === "true" && guestData && guestData.length > 0) {
+        const hasGuestData = (guestSemesters && guestSemesters.length > 0) || (guestPlans && guestPlans.length > 0);
+
+        if (isGuest === "true" && hasGuestData) {
           setSyncType("login");
           setShowSyncModal(true);
         } else {
@@ -765,7 +823,7 @@ const filteredNotifications = notifications.filter(n => notifFilter === "all" ? 
                     gap: isMobile ? "15px" : "0",
                   }}
                 >
-                  {/* === Мобільний дзвіночок сповіщень (тільки для телефонів) === */}
+                 {/* === Мобільний дзвіночок сповіщень (тільки для телефонів) === */}
                   {isMobile && (
                     <div
                       style={{
@@ -798,110 +856,124 @@ const filteredNotifications = notifications.filter(n => notifFilter === "all" ? 
                         )}
                       </button>
 
-                     {/* Спливаюче вікно для мобілки (Виїжджає знизу) */}
-<AnimatePresence>
-  {isNotifOpen && (
-    <>
-      {/* Затемнення фону на мобілці */}
-      <motion.div
-        className="mobile-notif-backdrop"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={() => setIsNotifOpen(false)}
-      />
-      <motion.div
-        className="notif-popover glass-panel mobile-bottom-sheet"
-        initial={{ y: "100%" }}
-        animate={{ y: 0 }}
-        exit={{ y: "100%" }}
-        transition={{
-          type: "spring",
-          damping: 25,
-          stiffness: 200,
-        }}
-      >
-        {/* Хедер вікна */}
-        <div className="notif-header">
-          <h3>Сповіщення</h3>
-          <span className="notif-count">
-            {filteredNotifications.length}
-          </span>
-        </div>
+                      {/* Спливаюче вікно для мобілки (Виїжджає знизу) */}
+                      <AnimatePresence>
+                        {isNotifOpen && (
+                          <>
+                            {/* Затемнення фону на мобілці */}
+                            <motion.div
+                              className="mobile-notif-backdrop"
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 1 }}
+                              exit={{ opacity: 0 }}
+                              onClick={() => setIsNotifOpen(false)}
+                            />
+                            <motion.div
+                              className="notif-popover glass-panel mobile-bottom-sheet"
+                              initial={{ y: "100%" }}
+                              animate={{ y: 0 }}
+                              exit={{ y: "100%" }}
+                              transition={{
+                                type: "spring",
+                                damping: 25,
+                                stiffness: 200,
+                              }}
+                            >
+                              {/* Хедер вікна */}
+                              <div className="notif-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                                  <h3>Сповіщення</h3>
+                                  <span className="notif-count">
+                                    {filteredNotifications.length}
+                                  </span>
+                                </div>
+                                {filteredNotifications.length > 0 && (
+                                  <button 
+                                    onClick={handleClearNotifications}
+                                    style={{ background: "none", border: "none", color: "#e63946", fontSize: "14px", fontWeight: "bold", cursor: "pointer", padding: "5px" }}
+                                  >
+                                    Очистити
+                                  </button>
+                                )}
+                              </div>
 
-        {/* КАТЕГОРІЇ СПОВІЩЕНЬ (ФІЛЬТРИ ДЛЯ МОБІЛКИ) */}
-        <div className="notif-filters">
-          <button
-            className={`notif-filter-btn ${notifFilter === "all" ? "active" : ""}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              setNotifFilter("all");
-            }}
-          >
-            Всі
-          </button>
-          <button
-            className={`notif-filter-btn ${notifFilter === "task" ? "active" : ""}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              setNotifFilter("task");
-            }}
-          >
-            Семестр
-          </button>
-          <button
-            className={`notif-filter-btn ${notifFilter === "plan" ? "active" : ""}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              setNotifFilter("plan");
-            }}
-          >
-            Календар
-          </button>
-        </div>
+                              {/* КАТЕГОРІЇ СПОВІЩЕНЬ (ФІЛЬТРИ ДЛЯ МОБІЛКИ) */}
+                              <div className="notif-filters">
+                                <button
+                                  className={`notif-filter-btn ${notifFilter === "all" ? "active" : ""}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setNotifFilter("all");
+                                  }}
+                                >
+                                  Всі
+                                </button>
+                                <button
+                                  className={`notif-filter-btn ${notifFilter === "task" ? "active" : ""}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setNotifFilter("task");
+                                  }}
+                                >
+                                  Семестр
+                                </button>
+                                <button
+                                  className={`notif-filter-btn ${notifFilter === "plan" ? "active" : ""}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setNotifFilter("plan");
+                                  }}
+                                >
+                                  Календар
+                                </button>
+                              </div>
 
-        {/* Тіло вікна з динамічним списком */}
-        <div className="notif-body scrollable-area">
-          {filteredNotifications.length === 0 ? (
-            <div className="notif-empty">
-              <Bell
-                size={32}
-                weight="duotone"
-                opacity={0.5}
-              />
-              <p>Немає сповіщень у цій категорії</p>
-            </div>
-          ) : (
-            filteredNotifications.map((n) => (
-              <div
-                key={n.id}
-                className={`notif-item ${n.type}`}
-              >
-                <div className="notif-icon">
-                  {n.type === "task" ? (
-                    <NotebookPen size={20} />
-                  ) : (
-                    <CalendarCheckIcon size={20} />
-                  )}
-                </div>
-                <div className="notif-content">
-                  <h4>{n.title}</h4>
-                  <p>{n.message}</p>
-                  <span className="notif-time">
-                    {n.timeRemaining}
-                  </span>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </motion.div>
-    </>
-  )}
-</AnimatePresence>
+                              {/* Тіло вікна з динамічним списком */}
+                              <div className="notif-body scrollable-area">
+                                {filteredNotifications.length === 0 ? (
+                                  <div className="notif-empty">
+                                    <Bell
+                                      size={32}
+                                      weight="duotone"
+                                      opacity={0.5}
+                                    />
+                                    <p>Немає сповіщень у цій категорії</p>
+                                  </div>
+                                ) : (
+                                  filteredNotifications.map((n) => (
+                                    <div
+                                      key={n.id}
+                                      className={`notif-item ${n.type}`}
+                                      style={{ 
+                                        opacity: n.isExpired ? 0.6 : 1, 
+                                        filter: n.isExpired ? "grayscale(80%)" : "none" 
+                                      }}
+                                    >
+                                      <div className="notif-icon">
+                                        {n.type === "task" ? (
+                                          <NotebookPen size={20} />
+                                        ) : (
+                                          <CalendarCheckIcon size={20} />
+                                        )}
+                                      </div>
+                                      <div className="notif-content">
+                                        <h4>{n.title}</h4>
+                                        <p>{n.message}</p>
+                                        <span className="notif-time" style={{ color: n.isExpired ? "#e63946" : "inherit" }}>
+                                          {n.timeRemaining}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            </motion.div>
+                          </>
+                        )}
+                      </AnimatePresence>
                     </div>
                   )}
-
+                  
                   <button
                     className="account-btn"
                     onClick={() => setCurrentScreen("profile")}
@@ -1014,15 +1086,22 @@ const filteredNotifications = notifications.filter(n => notifFilter === "all" ? 
                 {isMobile && <span>Календар</span>}
               </button>
               <button
-                className={`sidebar-btn ${currentScreen === "AIplaner" ? "active" : ""}`}
-                onClick={() => {
-                  setCurrentScreen("AIplaner");
-                  setIsMenuOpen(false);
-                }}
-              >
-                <HeadCircuitIcon size={35} color="#5c4b75" weight="bold" />
-                {isMobile && <span>AI Планувальник</span>}
-              </button>
+  className={`sidebar-btn ${currentScreen === "AIplaner" ? "active" : ""}`}
+  onClick={() => {
+    // Додаємо перевірку мережі перед переходом
+    if (!navigator.onLine) {
+      alert("ШІ Планувальник працює лише з підключенням до інтернету 🤖. Будь ласка, перевірте мережу.");
+      return; // Скасовуємо перехід, меню залишається відкритим
+    }
+    
+    // Якщо інтернет є, пускаємо на сторінку і закриваємо мобільне меню
+    setCurrentScreen("AIplaner");
+    setIsMenuOpen(false);
+  }}
+>
+  <HeadCircuitIcon size={35} color="#5c4b75" weight="bold" />
+  {isMobile && <span>AI Планувальник</span>}
+</button>
               <button
                 className={`sidebar-btn ${currentScreen === "Calculator" ? "active" : ""}`}
                 onClick={() => {
@@ -1089,11 +1168,21 @@ const filteredNotifications = notifications.filter(n => notifFilter === "all" ? 
                         exit={{ opacity: 0, x: -10, scale: 0.95 }}
                         transition={{ duration: 0.2 }}
                       >
-                        <div className="notif-header">
-                          <h3>Сповіщення</h3>
-                          <span className="notif-count">
-                            {filteredNotifications.length}
-                          </span>
+                        <div className="notif-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                            <h3>Сповіщення</h3>
+                            <span className="notif-count">
+                              {filteredNotifications.length}
+                            </span>
+                          </div>
+                          {filteredNotifications.length > 0 && (
+                            <button 
+                              onClick={handleClearNotifications}
+                              style={{ background: "none", border: "none", color: "#e63946", fontSize: "14px", fontWeight: "bold", cursor: "pointer", padding: "5px" }}
+                            >
+                              Очистити
+                            </button>
+                          )}
                         </div>
 
                         {/* КНОПКИ ФІЛЬТРУВАННЯ */}
@@ -1138,6 +1227,10 @@ const filteredNotifications = notifications.filter(n => notifFilter === "all" ? 
                               <div
                                 key={n.id}
                                 className={`notif-item ${n.type}`}
+                                style={{ 
+                                  opacity: n.isExpired ? 0.6 : 1, 
+                                  filter: n.isExpired ? "grayscale(80%)" : "none" 
+                                }}
                               >
                                 <div className="notif-icon">
                                   {n.type === "task" ? (
@@ -1149,7 +1242,7 @@ const filteredNotifications = notifications.filter(n => notifFilter === "all" ? 
                                 <div className="notif-content">
                                   <h4>{n.title}</h4>
                                   <p>{n.message}</p>
-                                  <span className="notif-time">
+                                  <span className="notif-time" style={{ color: n.isExpired ? "#e63946" : "inherit" }}>
                                     {n.timeRemaining}
                                   </span>
                                 </div>

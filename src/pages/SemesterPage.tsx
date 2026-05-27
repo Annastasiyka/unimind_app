@@ -29,6 +29,11 @@ interface Subject {
   credits: number;
   tasks: Task[];
 }
+interface Plan {
+  id?: number | string;
+  subjectId?: string;
+  [key: string]: unknown; 
+}
 
 interface Semester {
   id: string;
@@ -37,8 +42,9 @@ interface Semester {
   subjects: Subject[];
   iconIndex: number;
   isArchived?: boolean; 
+  updatedAt?: number; 
+  isDeleted?: boolean; 
 }
-
 interface SemesterPageProps {
   setCurrentScreen: (screen: string) => void;
   setSelectedSemesterId: (id: string) => void;
@@ -75,6 +81,26 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
   const getStorageKey = (guest: boolean, user: UserData | null) => {
     return guest ? "unimind-semesters-guest" : `unimind-semesters-${user?.name || "user"}`;
   };
+const mergeSemesters = (local: Semester[], server: Semester[]): Semester[] => {
+  const mergedMap = new Map<string, Semester>();
+
+  local.forEach(sem => mergedMap.set(sem.id, sem));
+
+  server.forEach(serverSem => {
+    const localSem = mergedMap.get(serverSem.id);
+    if (!localSem) {
+      mergedMap.set(serverSem.id, serverSem);
+    } else {
+      const localTime = localSem.updatedAt || 0;
+      const serverTime = serverSem.updatedAt || 0;
+      if (serverTime > localTime) {
+        mergedMap.set(serverSem.id, serverSem); 
+      }
+    }
+  });
+
+  return Array.from(mergedMap.values());
+};
 
   useEffect(() => {
     const initData = async () => {
@@ -86,22 +112,27 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
       setUserData(storedUser);
 
       const key = getStorageKey(guestStatus, storedUser);
-      const savedSemesters = await localforage.getItem<Semester[]>(key);
-      
-      if (savedSemesters) {
-        setSemesters(savedSemesters);
-      }
+      let savedSemesters = (await localforage.getItem<Semester[]>(key)) || [];
 
-      if (!guestStatus && storedUser?.id && (!savedSemesters || savedSemesters.length === 0)) {
+      // Якщо це не гість і є інтернет, пробуємо взяти нові дані з сервера
+      if (!guestStatus && storedUser?.id && navigator.onLine) {
         try {
           const response = await fetch(`${API_URL}/profile/${storedUser.id}`);
-          const dbUser = await response.json();
-          if (response.ok && dbUser.semesters) {
-            setSemesters(dbUser.semesters);
-            await localforage.setItem(key, dbUser.semesters);
+          if (response.ok) {
+            const dbUser = await response.json();
+            if (dbUser.semesters) {
+              // ОБ'ЄДНУЄМО ДАНІ!
+              savedSemesters = mergeSemesters(savedSemesters, dbUser.semesters);
+              // Зберігаємо оновлені дані локально (щоб вони були доступні офлайн)
+              await localforage.setItem(key, savedSemesters);
+            }
           }
-        } catch (e) { console.error(e); }
+        } catch (e) { 
+          console.error("Не вдалося синхронізуватися з сервером при завантаженні:", e); 
+        }
       }
+
+      setSemesters(savedSemesters);
       setTimeout(() => setIsLoading(false), 150);
     };
     initData();
@@ -129,25 +160,38 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
   }, [semesters, isGuest, userData, isLoading]);
 
   const calculateDefaultData = () => {
-    const nextName = `Семестр ${semesters.length + 1}`;
-    if (semesters.length === 0) {
+    const activeSemesters = semesters.filter(sem => !sem.isDeleted);
+
+    let maxNum = 0;
+    activeSemesters.forEach(sem => {
+      const match = sem.name.match(/Семестр\s+(\d+)/i);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (num > maxNum) maxNum = num;
+      }
+    });
+    
+    const nextName = `Семестр ${maxNum + 1}`;
+
+    if (activeSemesters.length === 0) {
       const today = new Date();
       const year = today.getFullYear();
       const nextYear = today.getMonth() >= 7 ? `${year}/${year + 1} (Осінній)` : `${year - 1}/${year} (Весняний)`;
       return { nextName, nextYear };
     }
     
-    const lastSem = semesters[0]; 
-    const match = lastSem.yearString.match(/(\d{4})\/(\d{4})\s*\((Осінній|Весняний)\)/);
+    const lastSem = activeSemesters[0]; 
+    const matchYear = lastSem.yearString.match(/(\d{4})\/(\d{4})\s*\((Осінній|Весняний)\)/);
     let nextYear = lastSem.yearString;
     
-    if (match) {
-      const startYear = parseInt(match[1], 10);
-      const endYear = parseInt(match[2], 10);
+    if (matchYear) {
+      const startYear = parseInt(matchYear[1], 10);
+      const endYear = parseInt(matchYear[2], 10);
       nextYear = lastSem.yearString.includes("Осінній") 
         ? `${startYear}/${endYear} (Весняний)` 
         : `${startYear + 1}/${endYear + 1} (Осінній)`;
     }
+    
     return { nextName, nextYear };
   };
 
@@ -167,19 +211,53 @@ export const SemesterPage = ({ setCurrentScreen, setSelectedSemesterId }: Semest
       subjects: [], 
       iconIndex: Math.floor(Math.random() * semesterIcons.length),
       isArchived: false,
+      updatedAt: Date.now()
     };
     setSemesters([newSemester, ...semesters]); 
     setIsModalOpen(false);
   };
 
-  const handleDeleteSemester = (id: string) => {
-    setSemesters(semesters.filter(s => s.id !== id));
+
+const handleDeleteSemester = async (id: string) => {
+    // 1. Знаходимо семестр, щоб витягнути ID всіх його предметів
+    const semesterToDelete = semesters.find(s => s.id === id);
+    const subjectIdsInSemester = semesterToDelete?.subjects.map(sub => sub.id) || [];
+
+    // 2. Оновлюємо стан семестрів (твоя логіка софт-видалення)
+    setSemesters(semesters.map(s => 
+      s.id === id 
+        ? { ...s, isDeleted: true, updatedAt: Date.now() } 
+        : s
+    ));
+
+    if (subjectIdsInSemester.length > 0) {
+      try {
+        const guestStatus = (await localforage.getItem("isGuest")) === "true";
+        const storedUser = await localforage.getItem<UserData>("userData");
+        const plansKey = guestStatus ? "unimind-plans-guest" : `unimind-plans-${storedUser?.name || "user"}`;
+
+const existingPlans: Plan[] = (await localforage.getItem(plansKey)) || [];      
+
+       const updatedPlans = existingPlans.map((p) =>
+  p.subjectId && subjectIdsInSemester.includes(p.subjectId)
+    ? { ...p, isDeleted: true, updatedAt: Date.now() }
+    : p
+);
+await localforage.setItem(plansKey, updatedPlans);
+        
+        window.dispatchEvent(new Event("plansUpdated"));
+      } catch (error) {
+        console.error("Помилка очищення календаря після видалення семестру:", error);
+      }
+    }
   };
 
-  const displaySemesters = [...semesters].sort((a, b) => {
-    if (a.isArchived === b.isArchived) return 0; 
-    return a.isArchived ? 1 : -1; 
-  });
+const displaySemesters = [...semesters]
+    .filter(sem => !sem.isDeleted)
+    .sort((a, b) => {
+      if (a.isArchived === b.isArchived) return 0; 
+      return a.isArchived ? 1 : -1; 
+    });
 
   if (isLoading) return <div className="semester-page" style={{ opacity: 0 }} />;
 

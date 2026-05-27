@@ -5028,12 +5028,13 @@ input[type="number"] {
 
 .notif-content {
   flex: 1;
+  color: var(--accent-color);
 }
 
 .notif-content h4 {
   margin: 0 0 4px 0;
   font-size: 14px;
-  color: #333;
+  color: var(--accent-color);
   font-weight: 600;
   text-align: left;
 }
@@ -5041,7 +5042,7 @@ input[type="number"] {
 .notif-content p {
   margin: 0 0 6px 0;
   font-size: 13px;
-  color: #555;
+  color: #4b3975be;
   line-height: 1.3;
   text-align: left;
 }

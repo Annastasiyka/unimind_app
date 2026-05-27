@@ -12,12 +12,13 @@ interface UserData {
   name: string;
   email: string;
   avatar?: string | null;
+  updatedAt?: number; 
   workSchedule?: {
     times?: Record<string, string>;
     days?: Record<string, boolean>;
+    updatedAt?: number; 
   };
 }
-
 interface ProfilePageProps {
   handleLogout: () => void;
   setCurrentScreen: (screen: string) => void;
@@ -103,20 +104,29 @@ const savedSchedule = await localforage.getItem<{
         if (savedDays) setActiveDays(savedDays);
       }
 
-      if (!guestStatus && storedUser?.id) {
+     if (!guestStatus && storedUser?.id && navigator.onLine) {
         try {
           const response = await fetch(`${API_URL}/profile/${storedUser.id}`);
-          const data = await response.json();
           if (response.ok) {
-            setUserName(data.name);
-            setAvatar(data.avatar);
-            if (data.workSchedule) {
-              setSelectedTime(data.workSchedule.times || {});
-              setActiveDays(data.workSchedule.days || {});
+            const data = await response.json();
+            const serverTime = data.updatedAt || 0;
+            const localTime = storedUser.updatedAt || 0;
+
+            if (serverTime >= localTime) {
+              setUserName(data.name);
+              setAvatar(data.avatar);
+              const updatedUser = { ...storedUser, name: data.name, avatar: data.avatar, updatedAt: serverTime };
+              await localforage.setItem("userData", updatedUser);
+              
+              if (data.workSchedule) {
+                setSelectedTime(data.workSchedule.times || {});
+                setActiveDays(data.workSchedule.days || {});
+                await localforage.setItem(`unimind-schedule-${data.name}`, data.workSchedule);
+              }
             }
           }
         } catch (error) {
-          console.error("Помилка:", error);
+          console.error("Офлайн: завантажено локальні дані", error);
         }
       }
       setIsLoading(false); 
@@ -124,16 +134,25 @@ const savedSchedule = await localforage.getItem<{
     initProfile();
   }, []);
 
- const saveWorkSchedule = async (newTimes: { [key: string]: string }, newActiveDays: { [key: string]: boolean }) => {
+const saveWorkSchedule = async (newTimes: { [key: string]: string }, newActiveDays: { [key: string]: boolean }) => {
     const nameKey = isGuest ? "Гість" : userName;
+    
+    // eslint-disable-next-line react-hooks/purity
+    const newTime = Date.now(); // Фіксуємо час зміни
+    
+    // Формуємо об'єкт із розкладом та міткою часу
+    const updatedSchedule = { times: newTimes, days: newActiveDays, updatedAt: newTime };
+
+    // 1. Завжди зберігаємо локально (офлайн-перший підхід)
     await localforage.setItem(`unimind-work-times-${nameKey}`, newTimes);
     await localforage.setItem(`unimind-active-days-${nameKey}`, newActiveDays);
     
     const scheduleKey = isGuest ? "unimind-schedule-guest" : `unimind-schedule-${nameKey}`;
-    await localforage.setItem(scheduleKey, { times: newTimes, days: newActiveDays });
+    await localforage.setItem(scheduleKey, updatedSchedule);
     
     window.dispatchEvent(new Event("scheduleUpdated"));
 
+    // 2. Якщо є мережа і це не гість, відправляємо на сервер
     if (!isGuest) {
       try {
         const storedUser = await localforage.getItem<UserData>("userData");
@@ -141,33 +160,35 @@ const savedSchedule = await localforage.getItem<{
           await fetch(`${API_URL}/profile/update-schedule`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ userId: storedUser.id, schedule: { times: newTimes, days: newActiveDays } }),
+            body: JSON.stringify({ userId: storedUser.id, schedule: updatedSchedule }),
           });
         }
-      } catch (error) { console.error(error); }
+      } catch { 
+        // Видалили (error) - помилка ESLint "no-unused-vars" зникне
+        console.log("Графік збережено офлайн. Синхронізується пізніше."); 
+      }
     }
   };
 
   const saveUserData = async (newName: string, newAvatar: string | null) => {
     const storedUser = (await localforage.getItem<UserData>("userData")) || ({} as UserData);
+    
+    const newTime = Date.now();
+    
+    const updatedUser = { ...storedUser, name: newName, avatar: newAvatar, updatedAt: newTime };
+    await localforage.setItem("userData", updatedUser);
+    window.dispatchEvent(new Event("userDataUpdated"));
+
     if (!isGuest && storedUser.id) {
       try {
-        const response = await fetch(`${API_URL}/profile/update-info`, {
+        await fetch(`${API_URL}/profile/update-info`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: storedUser.id, name: newName, avatar: newAvatar }),
+          body: JSON.stringify({ userId: storedUser.id, name: newName, avatar: newAvatar, updatedAt: newTime }), 
         });
-        if (response.ok) {
-          const data = await response.json();
-          const updatedUser = { ...storedUser, name: data.user.name, avatar: data.user.avatar };
-          await localforage.setItem("userData", updatedUser);
-          window.dispatchEvent(new Event("userDataUpdated"));
-        }
-      } catch (error) { console.error(error); }
-    } else {
-      const updatedUser = { ...storedUser, name: newName, avatar: newAvatar };
-      await localforage.setItem("userData", updatedUser);
-      window.dispatchEvent(new Event("userDataUpdated"));
+      } catch { 
+        console.log("Профіль змінено офлайн. Дані чекають на синхронізацію."); 
+      }
     }
   };
 
@@ -190,7 +211,18 @@ const savedSchedule = await localforage.getItem<{
       } else { setPasswordMessage(data.message || "Помилка"); }
     } catch { setPasswordMessage("Сервер недоступний"); }
   };
-
+const handleSecurityToggle = () => {
+    if (!isSecurityOpen && !navigator.onLine) {
+      alert("Зміна паролю недоступна в офлайн-режимі. Будь ласка, підключіться до мережі.");
+      return; 
+    }
+  
+    setIsSecurityOpen(!isSecurityOpen);
+    
+    if (!isSecurityOpen) {
+      setPasswordMessage(""); 
+    }
+  };
   const handlePhotoClick = () => fileInputRef.current?.click();
   const handleNameEditClick = () => { setIsEditingName(true); setTimeout(() => nameInputRef.current?.focus(), 0); };
   const handleNameSave = () => { setIsEditingName(false); saveUserData(userName, avatar); };
@@ -351,8 +383,7 @@ const savedSchedule = await localforage.getItem<{
 
             <div className="auth-divider"></div>
 
-            <div className="auth-section accordion" onClick={() => setIsSecurityOpen(!isSecurityOpen)}>
-              <div className="auth-section-header">
+<div className="auth-section accordion" onClick={handleSecurityToggle}>              <div className="auth-section-header">
                 <div className="auth-icon-bg"><Shield size={22} color="#5c4b75"/></div>
                 <div className="auth-section-text">
                   <h3>Безпека</h3>

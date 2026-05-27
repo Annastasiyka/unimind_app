@@ -31,6 +31,7 @@ interface Plan {
   type: string;
   time?: string;
   origin?: string;
+  isDeleted?: boolean;
 }
 
 interface UserData { id: number; name: string; email: string; }
@@ -173,8 +174,8 @@ const plannerTasks: PlannerTask[] = useMemo(() => {
       return "personal";
     };
 
-    return allPlans
-      .filter(p => !p.completed && p.time && typeof p.time === 'string' && p.time.includes(':'))
+  return allPlans
+      .filter(p => !p.completed && !p.isDeleted && p.time && typeof p.time === 'string' && p.time.includes(':'))
       .map(p => {
         const [h, m] = p.time!.split(':').map(Number);
         const dur = (p.type === "Навчання" || p.type === "Лабораторна") ? 90 : 60;
@@ -244,22 +245,23 @@ const hoursGrid = useMemo(() => {
       ? [normalizeDate(`${baseDate.getDate()}-${baseDate.getMonth() + 1}-${baseDate.getFullYear()}`)]
       : currentWeekDays.map(d => normalizeDate(`${d.getDate()}-${d.getMonth() + 1}-${d.getFullYear()}`));
 
-    return allPlans.filter(p => {
-      if (p.completed) return false;
+   return allPlans.filter(p => {
+      if (p.completed || p.isDeleted) return false;
       const hasNoTime = !p.time || typeof p.time !== 'string' || !p.time.includes(':');
       return hasNoTime && datesToCheck.includes(normalizeDate(p.date));
     });
   }, [allPlans, baseDate, viewMode, currentWeekDays]);
 
-  const overdueTasks = useMemo(() => {
+ const overdueTasks = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     return allPlans.filter(p => {
-      if (p.completed) return false; 
+      if (p.completed || p.isDeleted) return false; 
       if (!p.date) return false;
       const parts = p.date.split('-');
       if (parts.length === 3) {
-        const planDate = new Date(Number(parts[2]), Number(parts[1]), Number(parts[0]));
+        // Виправлено: віднімаємо 1 від місяця, бо в JS вони рахуються з 0
+        const planDate = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
         planDate.setHours(0, 0, 0, 0);
         return planDate < today; 
       }
@@ -267,58 +269,88 @@ const hoursGrid = useMemo(() => {
     });
   }, [allPlans]);
 
-const triggerAutoScheduling = useCallback(async (tasksToSchedule: Plan[], targetDateStr: string) => {
-  setIsAutoScheduling(true);
-  
-  const plansForTargetDay = allPlans.filter(p => !p.completed && normalizeDate(p.date) === targetDateStr);
-  const now = new Date();
-  const isToday = targetDateStr === normalizeDate(`${now.getDate()}-${now.getMonth() + 1}-${now.getFullYear()}`);
-  const timeToPass = isToday ? now.toLocaleTimeString("uk-UA", { hour: '2-digit', minute: '2-digit' }) : "09:00";
+  const savePlansToStorage = useCallback(async (updatedPlans: Plan[]) => {
+    const isGuest = (await localforage.getItem("isGuest")) === "true";
+    const nameKey = isGuest ? "Гість" : (userData?.name || "user");
+    const plansKey = isGuest ? "unimind-plans-guest" : `unimind-plans-${nameKey}`;
 
-  try {
-    const res = await fetch(`${API_URL}/ai/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        isAutoOptimize: true, 
-        tasksToSchedule: tasksToSchedule,
-        userId: userData?.id, 
-        workSchedule, 
-        realTime: timeToPass, 
-        realDate: targetDateStr, 
-        plansForToday: plansForTargetDay
-      })
-    });
+    await localforage.setItem(plansKey, updatedPlans);
 
-    const data = await res.json();
-const incomingPlans = data.updatedPlans || data.updatedPlansForToday || data.newPlans;
-
-    if (incomingPlans && Array.isArray(incomingPlans)) {
-      const normalizedIncoming = incomingPlans.map((p: Plan) => ({ ...p, date: normalizeDate(p.date) }));
-      
-      setAllPlans(prev => {
-        const updated = [...prev];
-        normalizedIncoming.forEach((newP: Plan) => {
-          const index = updated.findIndex(oldP => String(oldP.id) === String(newP.id));
-          if (index !== -1) updated[index] = { ...updated[index], ...newP };
-          else updated.push(newP);
+    if (!isGuest && userData?.id) {
+      try {
+        await fetch(`${API_URL}/ai/save-plans`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: userData.id, plans: updatedPlans })
         });
-        
-        setHasUnsavedChanges(true); 
-        return updated;
-      });
+      } catch (err) {
+        console.error("Помилка синхронізації з сервером:", err);
+      }
     }
-  } catch (err) {
-    console.error("Помилка автоматичного планування:", err);
-    lastAutoProcessedRef.current = ""; 
-  } finally {
-    setIsAutoScheduling(false);
-  }
-}, [allPlans, userData, workSchedule]); 
+    window.dispatchEvent(new Event("plansUpdated"));
+  }, [userData]);
+
+const triggerAutoScheduling = useCallback(async (tasksToSchedule: Plan[], targetDateStr: string) => {
+    setIsAutoScheduling(true);
+    
+    const plansForTargetDay = allPlans.filter(p => !p.completed && !p.isDeleted && normalizeDate(p.date) === targetDateStr);
+    const now = new Date();
+    const isToday = targetDateStr === normalizeDate(`${now.getDate()}-${now.getMonth() + 1}-${now.getFullYear()}`);
+    const timeToPass = isToday ? now.toLocaleTimeString("uk-UA", { hour: '2-digit', minute: '2-digit' }) : "09:00";
+
+    try {
+      const res = await fetch(`${API_URL}/ai/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          isAutoOptimize: true, 
+          tasksToSchedule: tasksToSchedule,
+          userId: userData?.id, 
+          workSchedule, 
+          realTime: timeToPass, 
+          realDate: targetDateStr, 
+          plansForToday: plansForTargetDay
+        })
+      });
+
+      const data = await res.json();
+      const incomingPlans = data.updatedPlans || data.updatedPlansForToday || data.newPlans;
+
+      if (incomingPlans && Array.isArray(incomingPlans)) {
+        const normalizedIncoming = incomingPlans.map((p: Plan) => ({ ...p, date: normalizeDate(p.date) }));
+        
+        setAllPlans(prev => {
+          const updated = [...prev];
+          normalizedIncoming.forEach((newP: Plan) => {
+            const index = updated.findIndex(oldP => String(oldP.id) === String(newP.id));
+            if (index !== -1) updated[index] = { ...updated[index], ...newP };
+            else updated.push(newP);
+          });
+          
+          if (isGuestMode) {
+            // Для гостя миттєво зберігаємо без кнопок
+            savePlansToStorage(updated);
+            setHasUnsavedChanges(false);
+          } else {
+            // Авторизованому юзеру показуємо кнопки "Зберегти/Скасувати"
+            setHasUnsavedChanges(true); 
+          }
+          
+          return updated;
+        });
+      }
+    } catch (err) {
+      console.error("Помилка автоматичного планування:", err);
+      lastAutoProcessedRef.current = ""; 
+    } finally {
+      setIsAutoScheduling(false);
+    }
+  }, [allPlans, userData, workSchedule, isGuestMode, savePlansToStorage]); 
+
   const handleSilentOverdueScheduling = async () => {
     setIsAutoScheduling(true);
     const targetDateStr = normalizeDate(`${baseDate.getDate()}-${baseDate.getMonth() + 1}-${baseDate.getFullYear()}`);
-    const plansForTargetDay = allPlans.filter(p => !p.completed && normalizeDate(p.date) === targetDateStr);
+    const plansForTargetDay = allPlans.filter(p => !p.completed && !p.isDeleted && normalizeDate(p.date) === targetDateStr);
     const now = new Date();
     const timeToPass = now.toLocaleTimeString("uk-UA", { hour: '2-digit', minute: '2-digit' });
 
@@ -349,7 +381,16 @@ const incomingPlans = data.updatedPlans || data.updatedPlansForToday || data.new
             if (index !== -1) updated[index] = { ...updated[index], ...newP };
             else updated.push(newP);
           });
-          setHasUnsavedChanges(true); 
+          
+          if (isGuestMode) {
+            // Для гостя миттєво зберігаємо без кнопок
+            savePlansToStorage(updated);
+            setHasUnsavedChanges(false);
+          } else {
+            // Авторизованому юзеру показуємо кнопки "Зберегти/Скасувати"
+            setHasUnsavedChanges(true); 
+          }
+          
           return updated;
         });
       }
@@ -391,8 +432,7 @@ const incomingPlans = data.updatedPlans || data.updatedPlansForToday || data.new
     setIsAiLoading(true);
 
     const targetDateStr = normalizeDate(`${baseDate.getDate()}-${baseDate.getMonth() + 1}-${baseDate.getFullYear()}`);
-    const plansForTargetDay = allPlans.filter(p => !p.completed && normalizeDate(p.date) === targetDateStr);
-    
+const plansForTargetDay = allPlans.filter(p => !p.completed && !p.isDeleted && normalizeDate(p.date) === targetDateStr);    
     const now = new Date();
     const isToday = targetDateStr === normalizeDate(`${now.getDate()}-${now.getMonth() + 1}-${now.getFullYear()}`);
     const timeToPass = isToday ? now.toLocaleTimeString("uk-UA", { hour: '2-digit', minute: '2-digit' }) : "09:00";
@@ -446,26 +486,7 @@ const incomingPlans = data.updatedPlans || data.updatedPlansForToday || data.new
       setMessages(prev => [...prev, { id: `err-${Date.now()}`, role: "ai", text: "Помилка зв'язку з асистентом." }]);
     } finally { setIsAiLoading(false); }
   };
-const savePlansToStorage = async (updatedPlans: Plan[]) => {
-    const isGuest = (await localforage.getItem("isGuest")) === "true";
-    const nameKey = isGuest ? "Гість" : (userData?.name || "user");
-    const plansKey = isGuest ? "unimind-plans-guest" : `unimind-plans-${nameKey}`;
 
-    await localforage.setItem(plansKey, updatedPlans);
-
-    if (!isGuest && userData?.id) {
-      try {
-        await fetch(`${API_URL}/ai/save-plans`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: userData.id, plans: updatedPlans })
-        });
-      } catch (err) {
-        console.error("Помилка синхронізації з сервером:", err);
-      }
-    }
-    window.dispatchEvent(new Event("plansUpdated"));
-  };
 
  const handleSavePlansToServer = async () => {
     setIsSaving(true);
@@ -656,9 +677,24 @@ const currentDayStr = normalizeDate(`${baseDate.getDate()}-${baseDate.getMonth()
           </AnimatePresence>
         </div>
 
-        <div className="ai-optimization-bar" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "15px 20px", minHeight: "70px" }}>
+        <div className="ai-optimization-bar" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "15px 20px", minHeight: "70px", gap: "15px" }}>
           <AnimatePresence>
-            {hasUnsavedChanges && (
+            {/* Кнопка перепланування ТІЛЬКИ ДЛЯ ГОСТЯ І ТІЛЬКИ ЯКЩО Є ПРОТЕРМІНОВАНІ */}
+            {isGuestMode && !hasUnsavedChanges && overdueTasks.length > 0 && (
+              <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
+                 <button 
+                  onClick={handleSilentOverdueScheduling}
+                  disabled={isAiLoading || isAutoScheduling}
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#d2b6d5a5', color: '#705289', border: 'none', padding: '10px 20px', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 5px 15px rgba(97, 9, 138, 0.4)' }}
+                >
+                  {isAutoScheduling ? <CircleNotch size={18} className="spin-fast" color="#fff" /> : <Sparkle size={18} weight="fill" />}
+                  {isAutoScheduling ? "Аналізую..." : "Перепланувати день"}
+                </button>
+              </motion.div>
+            )}
+
+            {/* Кнопки збереження ТІЛЬКИ ДЛЯ АВТОРИЗОВАНИХ */}
+            {hasUnsavedChanges && !isGuestMode && (
               <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} style={{ display: "flex", gap: "12px" }}>
                 <button 
                   onClick={handleDiscardChanges} 

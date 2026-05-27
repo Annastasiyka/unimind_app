@@ -205,22 +205,26 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
     initDashboard();
   }, [semesterId]);
 
-  const syncWithGlobalStorage = useCallback(async (updatedSubjects: Subject[]) => {
+const syncWithGlobalStorage = useCallback(async (updatedSubjects: Subject[]) => {
     const key = getStorageKey(isGuest, userData);
     const allSemesters: Semester[] = (await localforage.getItem(key)) || [];
     const updatedSemesters = allSemesters.map((s) =>
-      s.id === semesterId ? { ...s, subjects: updatedSubjects, isArchived } : s
+      s.id === semesterId 
+        ? { ...s, subjects: updatedSubjects, isArchived, updatedAt: Date.now() }
+        : s
     );
     await localforage.setItem(key, updatedSemesters);
   }, [semesterId, isGuest, userData, isArchived]);
 
   useEffect(() => {
     if (isLoading) return;
-    const syncWithServer = async () => {
+ const syncWithServer = async () => {
       const key = getStorageKey(isGuest, userData);
       const allSemesters: Semester[] = (await localforage.getItem(key)) || [];
       const updatedSemesters = allSemesters.map((s) =>
-        s.id === semesterId ? { ...s, subjects, isArchived } : s
+        s.id === semesterId 
+          ? { ...s, subjects, isArchived, updatedAt: Date.now() } 
+          : s
       );
       await localforage.setItem(key, updatedSemesters);
 
@@ -247,6 +251,26 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
     const timeoutId = setTimeout(syncWithServer, 1000);
     return () => clearTimeout(timeoutId);
   }, [subjects, isArchived, semesterId, isGuest, userData, isLoading]);
+
+  useEffect(() => {
+    const handleSemesterUpdate = async () => {
+      const guestStatus = (await localforage.getItem("isGuest")) === "true";
+      const storedUser = await localforage.getItem<UserData>("userData");
+      const key = getStorageKey(guestStatus, storedUser);
+      
+      const allSemesters: Semester[] = (await localforage.getItem(key)) || [];
+      const currentSem = allSemesters.find((s) => s.id === semesterId);
+      
+      if (currentSem) {
+        setSubjects(currentSem.subjects || []);
+      }
+    };
+
+    window.addEventListener("semestersUpdated", handleSemesterUpdate);
+    return () => {
+      window.removeEventListener("semestersUpdated", handleSemesterUpdate);
+    };
+  }, [semesterId]);
 
   const handleToggleArchive = () => setIsArchived(!isArchived);
 
@@ -353,8 +377,7 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
         const existingPlans: Plan[] = (await localforage.getItem(plansKey)) || [];
         
         const d = new Date(newTaskDeadline);
-        const formattedDate = `${d.getDate()}-${d.getMonth()}-${d.getFullYear()}`;
-        
+const formattedDate = `${d.getDate()}-${d.getMonth() + 1}-${d.getFullYear()}`;        
         const calendarType = (newTaskType === "Лабораторні" || newTaskType === "Індивідуальна робота") 
           ? "Лабораторна" 
           : "Навчання";
@@ -399,18 +422,17 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
           });
         }
         
-        await localforage.setItem(plansKey, existingPlans);
+      await localforage.setItem(plansKey, existingPlans);
+        window.dispatchEvent(new Event("plansUpdated")); // <--- ДОДАЙ ЦЕЙ РЯДОК
       } catch (error) {
         console.error("Помилка при додаванні завдання в календар:", error);
       }
     }
   };
 
-  // --- ДОДАНО ФУНКЦІЮ ВИДАЛЕННЯ ЗАВДАННЯ ТА СИНХРОНІЗАЦІЇ З КАЛЕНДАРЕМ ---
-  const handleDeleteTask = async (subjectId: string, taskId: string) => {
+const handleDeleteTask = async (subjectId: string, taskId: string) => {
     if (isArchived) return;
 
-    // 1. Видаляємо завдання зі списку предметів семестру
     const updated = subjects.map((subj) => 
       subj.id === subjectId 
         ? { ...subj, tasks: subj.tasks.filter((x) => x.id !== taskId) } 
@@ -419,24 +441,61 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
     setSubjects(updated); 
     await syncWithGlobalStorage(updated); 
 
-    // 2. Видаляємо зв'язане завдання з планів календаря в localforage
     try {
       const guestStatus = (await localforage.getItem("isGuest")) === "true";
       const storedUser = await localforage.getItem<UserData>("userData");
       const plansKey = guestStatus ? "unimind-plans-guest" : `unimind-plans-${storedUser?.name || "user"}`;
       
       const existingPlans: Plan[] = (await localforage.getItem(plansKey)) || [];
-      // Фільтруємо плани за taskId
-      const filteredPlans = existingPlans.filter((p) => p.taskId !== taskId);
       
-      await localforage.setItem(plansKey, filteredPlans);
-      // ПРИМІТКА: Зміна стану subjects триггерне існуючий useEffect-синхронізатор,
-      // який через 1 сек візьме ці оновлені filteredPlans з localforage та запише в БД.
+      // ВИПРАВЛЕНО ТУТ: м'яке видалення завдання з планів
+      const updatedPlans = existingPlans.map((p) =>
+        p.taskId === taskId
+          ? { ...p, isDeleted: true, updatedAt: Date.now() }
+          : p
+      );
+      
+      await localforage.setItem(plansKey, updatedPlans);
+      window.dispatchEvent(new Event("plansUpdated")); 
     } catch (error) {
       console.error("Помилка при видаленні завдання з календаря:", error);
     }
   };
 
+  const handleDeleteSubject = async (subjectId: string) => {
+    if (isArchived) return;
+    
+    if (!window.confirm("Ви впевнені, що хочете видалити цей предмет та всі пов'язані з ним завдання в календарі?")) return;
+
+    const updatedSubjects = subjects.filter((s) => s.id !== subjectId);
+    setSubjects(updatedSubjects);
+    await syncWithGlobalStorage(updatedSubjects);
+
+    if (activeSubjectId === subjectId) {
+      setActiveSubjectId(updatedSubjects.length > 0 ? updatedSubjects[0].id : null);
+    }
+
+    try {
+      const guestStatus = (await localforage.getItem("isGuest")) === "true";
+      const storedUser = await localforage.getItem<UserData>("userData");
+      const plansKey = guestStatus ? "unimind-plans-guest" : `unimind-plans-${storedUser?.name || "user"}`;
+
+      const existingPlans: Plan[] = (await localforage.getItem(plansKey)) || [];
+      
+      // ВИПРАВЛЕНО ТУТ: м'яке видалення всіх планів предмета
+      const updatedPlans = existingPlans.map((p) =>
+        p.subjectId === subjectId
+          ? { ...p, isDeleted: true, updatedAt: Date.now() }
+          : p
+      );
+
+      await localforage.setItem(plansKey, updatedPlans);
+      
+      window.dispatchEvent(new Event("plansUpdated"));
+    } catch (error) {
+      console.error("Помилка при видаленні планів предмета з календаря:", error);
+    }
+  };
   const handleNumberChange = (value: string, setter: (val: number | "") => void) => {
     const cleaned = value.replace(/[^0-9]/g, "");
     setter(cleaned === "" ? "" : Number(cleaned));
@@ -501,8 +560,7 @@ return (
                         {!isArchived && (
                           <>
                             <PencilSimple size={18} weight="duotone" onClick={(e) => { e.stopPropagation(); setEditingSubjectId(s.id); setNewSubName(s.name); setNewSubCredits(s.credits); setIsSubjectModalOpen(true); }} />
-                            <Trash size={18} weight="duotone" onClick={(e) => { e.stopPropagation(); const u = subjects.filter(x => x.id !== s.id); setSubjects(u); syncWithGlobalStorage(u); if (activeSubjectId === s.id) setActiveSubjectId(null); }} />
-                          </>
+<Trash size={18} weight="duotone" onClick={(e) => { e.stopPropagation(); handleDeleteSubject(s.id); }} />                          </>
                         )}
                       </div>
                     </div>
@@ -657,8 +715,7 @@ return (
                       {!isArchived && (
                         <>
                           <PencilSimple size={18} weight="duotone" className="dash-action-icon" onClick={(e) => { e.stopPropagation(); setEditingSubjectId(s.id); setNewSubName(s.name); setNewSubCredits(s.credits); setIsSubjectModalOpen(true); }} />
-                          <Trash size={18} weight="duotone" className="dash-action-icon" onClick={(e) => { e.stopPropagation(); const u = subjects.filter(x => x.id !== s.id); setSubjects(u); syncWithGlobalStorage(u); if (activeSubjectId === s.id) setActiveSubjectId(subjects.length > 1 ? subjects[0].id : null); }} />
-                        </>
+<Trash size={18} weight="duotone" className="dash-action-icon" onClick={(e) => { e.stopPropagation(); handleDeleteSubject(s.id); }} />                        </>
                       )}
                     </div>
                   </div>

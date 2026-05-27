@@ -38,6 +38,7 @@ interface Semester {
   id: string;
   name: string;
   subjects: Subject[];
+  isDeleted?: boolean;
 }
 
 interface SimulatedSubject {
@@ -127,7 +128,7 @@ export const CalculatorPage = () => {
   const [isSemDropdownOpen, setIsSemDropdownOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
-  useEffect(() => {
+ useEffect(() => {
     const initCalc = async () => {
       setIsLoading(true);
       const guestStatus = await localforage.getItem("isGuest") === "true";
@@ -140,7 +141,9 @@ export const CalculatorPage = () => {
       const storageKey = `unimind-semesters-${namePart}`;
       const simulationsKey = `unimind-simulations-${namePart}`;
 
-      const savedSemesters = await localforage.getItem<Semester[]>(storageKey) || [];
+      const rawSemesters = await localforage.getItem<Semester[]>(storageKey) || [];
+      const savedSemesters = rawSemesters.filter(sem => !sem.isDeleted);
+      
       const savedSims = await localforage.getItem<Profile[]>(simulationsKey);
 
       setAllSemesters(savedSemesters);
