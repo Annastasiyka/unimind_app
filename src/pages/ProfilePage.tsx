@@ -52,7 +52,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
   handleLogout,
   setCurrentScreen,
 }) => {
-  const [isLoading, setIsLoading] = useState(true); // Для контролю плавності
+  const [isLoading, setIsLoading] = useState(true); 
   const [isGuest, setIsGuest] = useState<boolean>(false);
   const [userName, setUserName] = useState("");
   const [avatar, setAvatar] = useState<string | null>(null);
@@ -76,7 +76,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [isEditingName, setIsEditingName] = useState(false);
 
-  useEffect(() => {
+ useEffect(() => {
     const initProfile = async () => {
       const guestStatus = await localforage.getItem("isGuest") === "true";
       setIsGuest(guestStatus);
@@ -87,11 +87,21 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
       setUserName(guestStatus ? "Гість" : (storedUser?.name || "Користувач"));
       setAvatar(storedUser?.avatar || null);
 
-      const savedTimes = await localforage.getItem<{ [key: string]: string }>(`unimind-work-times-${nameKey}`);
-      if (savedTimes) setSelectedTime(savedTimes);
+      const scheduleKey = guestStatus ? "unimind-schedule-guest" : `unimind-schedule-${nameKey}`;
+const savedSchedule = await localforage.getItem<{ 
+  times?: Record<string, string>; 
+  days?: Record<string, boolean>; 
+}>(scheduleKey);
+      if (savedSchedule) {
+        setSelectedTime(savedSchedule.times || {});
+        setActiveDays(savedSchedule.days || {});
+      } else {
+        const savedTimes = await localforage.getItem<{ [key: string]: string }>(`unimind-work-times-${nameKey}`);
+        if (savedTimes) setSelectedTime(savedTimes);
 
-      const savedDays = await localforage.getItem<{ [key: string]: boolean }>(`unimind-active-days-${nameKey}`);
-      if (savedDays) setActiveDays(savedDays);
+        const savedDays = await localforage.getItem<{ [key: string]: boolean }>(`unimind-active-days-${nameKey}`);
+        if (savedDays) setActiveDays(savedDays);
+      }
 
       if (!guestStatus && storedUser?.id) {
         try {
@@ -114,10 +124,16 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
     initProfile();
   }, []);
 
-  const saveWorkSchedule = async (newTimes: { [key: string]: string }, newActiveDays: { [key: string]: boolean }) => {
+ const saveWorkSchedule = async (newTimes: { [key: string]: string }, newActiveDays: { [key: string]: boolean }) => {
     const nameKey = isGuest ? "Гість" : userName;
     await localforage.setItem(`unimind-work-times-${nameKey}`, newTimes);
     await localforage.setItem(`unimind-active-days-${nameKey}`, newActiveDays);
+    
+    const scheduleKey = isGuest ? "unimind-schedule-guest" : `unimind-schedule-${nameKey}`;
+    await localforage.setItem(scheduleKey, { times: newTimes, days: newActiveDays });
+    
+    window.dispatchEvent(new Event("scheduleUpdated"));
+
     if (!isGuest) {
       try {
         const storedUser = await localforage.getItem<UserData>("userData");

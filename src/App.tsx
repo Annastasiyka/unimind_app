@@ -21,7 +21,6 @@ import { LoginPage } from "./pages/LoginPage";
 import { SignupPage } from "./pages/SignupPage";
 import { SemesterDashboard } from "./pages/SemesterDashboard";
 
-// Налаштування бази даних IndexedDB
 localforage.config({
   name: "UniMind",
   storeName: "app_state",
@@ -29,7 +28,6 @@ localforage.config({
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
-// --- Інтерфейси ---
 interface ZoomEvent extends Event {
   ctrlKey?: boolean;
   scale?: number;
@@ -77,7 +75,6 @@ interface UserData {
   plans?: Plan[];
 }
 
-// Інтерфейс для сповіщення
 interface NotificationItem {
   id: string;
   title: string;
@@ -161,26 +158,29 @@ function App() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // --- ЛОГІКА ГЕНЕРАЦІЇ СПОВІЩЕНЬ ---
   const fetchNotifications = useCallback(async () => {
     if (!name) return [];
     const now = new Date();
     const newNotifs: NotificationItem[] = [];
     const storageName = name === "Гість" ? "guest" : name;
 
-    // 1. Перевірка завдань з семестрів
     const semesters = await localforage.getItem<Semester[]>(
-      `unimind-semesters-${storageName}`,
+      `unimind-semesters-${storageName}`
     );
+    
     if (semesters) {
+      const todayDateOnly = new Date();
+      todayDateOnly.setHours(0, 0, 0, 0);
+
       semesters.forEach((sem) => {
         sem.subjects?.forEach((subj) => {
           subj.tasks?.forEach((task) => {
             if (task.deadline && task.status !== "Здано") {
-              const deadlineDate = new Date(task.deadline);
-              deadlineDate.setHours(23, 59, 59, 999);
-              const diffTime = deadlineDate.getTime() - now.getTime();
-              const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+              const [year, month, day] = task.deadline.split("-").map(Number);
+              const deadlineDate = new Date(year, month - 1, day);
+              deadlineDate.setHours(0, 0, 0, 0); 
+              const diffTime = deadlineDate.getTime() - todayDateOnly.getTime();
+              const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
 
               if (diffDays > 1 && diffDays <= 5) {
                 newNotifs.push({
@@ -191,14 +191,30 @@ function App() {
                   type: "task",
                   rawDate: deadlineDate,
                 });
-              } else if (diffDays === 1 || diffDays === 0) {
+              } else if (diffDays === 1) {
                 newNotifs.push({
                   id: `task-${task.id}-1d`,
-                  title:
-                    "Увага! Дедлайн " +
-                    (diffDays === 0 ? "СЬОГОДНІ" : "ЗАВТРА"),
+                  title: "Увага! Дедлайн ЗАВТРА",
+                  message: `${subj.name}: ${task.name}`,
+                  timeRemaining: "Залишився 1 день!",
+                  type: "task",
+                  rawDate: deadlineDate,
+                });
+              } else if (diffDays === 0) {
+                newNotifs.push({
+                  id: `task-${task.id}-0d`,
+                  title: "Увага! Дедлайн СЬОГОДНІ",
                   message: `${subj.name}: ${task.name}`,
                   timeRemaining: "Терміново!",
+                  type: "task",
+                  rawDate: deadlineDate,
+                });
+              } else if (diffDays < 0) {
+                newNotifs.push({
+                  id: `task-${task.id}-overdue`,
+                  title: "Дедлайн ПРОПУЩЕНО",
+                  message: `${subj.name}: ${task.name}`,
+                  timeRemaining: `Протерміновано на ${Math.abs(diffDays)} дн.`,
                   type: "task",
                   rawDate: deadlineDate,
                 });
@@ -209,10 +225,10 @@ function App() {
       });
     }
 
-    // 2. Перевірка планів
     const plans = await localforage.getItem<Plan[]>(
-      `unimind-plans-${storageName}`,
+      `unimind-plans-${storageName}`
     );
+    
     if (plans) {
       plans.forEach((plan) => {
         if (!plan.completed && plan.date && plan.time) {
@@ -220,8 +236,8 @@ function App() {
           if (parts.length === 3) {
             const planDate = new Date(
               Number(parts[2]),
-              Number(parts[1]),
-              Number(parts[0]),
+              Number(parts[1]), 
+              Number(parts[0])
             );
             const [hours, minutes] = plan.time.split(":");
             planDate.setHours(Number(hours), Number(minutes), 0, 0);
@@ -238,6 +254,15 @@ function App() {
                 type: "plan",
                 rawDate: planDate,
               });
+            } else if (diffHours <= 0 && diffHours > -24) {
+              newNotifs.push({
+                id: `plan-${plan.id}-passed`,
+                title: "Час виконання минув",
+                message: plan.text,
+                timeRemaining: `Було о ${plan.time}`,
+                type: "plan",
+                rawDate: planDate,
+              });
             }
           }
         }
@@ -248,7 +273,6 @@ function App() {
     return newNotifs;
   }, [name]);
 
-  // Оновлюємо нотифікації безпечно для ESLint
   useEffect(() => {
     let isMounted = true;
 
@@ -266,7 +290,6 @@ function App() {
     };
   }, [currentScreen, fetchNotifications]);
 
-  // Закриття нотифікацій при кліку поза вікном
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (
@@ -281,7 +304,6 @@ function App() {
     }
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isNotifOpen]);
-  // --- /КІНЕЦЬ ЛОГІКИ СПОВІЩЕНЬ ---
 
   useEffect(() => {
     const handleStorageChange = async () => {
@@ -581,7 +603,7 @@ function App() {
   };
 const filteredNotifications = notifications.filter(n => notifFilter === "all" ? true : n.type === notifFilter);
   if (isAppLoading)
-    return <div className="loading-screen">Завантаження UniMind...</div>;
+    return <div className="loading-screen"></div>;
 
   const renderPageContent = () => {
     switch (currentScreen) {
@@ -776,112 +798,107 @@ const filteredNotifications = notifications.filter(n => notifFilter === "all" ? 
                         )}
                       </button>
 
-                      {/* Спливаюче вікно для мобілки (Виїжджає знизу) */}
-                      <AnimatePresence>
-                        {isNotifOpen && (
-                          <>
-                            {/* Затемнення фону на мобілці */}
-                            <motion.div
-                              className="mobile-notif-backdrop"
-                              initial={{ opacity: 0 }}
-                              animate={{ opacity: 1 }}
-                              exit={{ opacity: 0 }}
-                              onClick={() => setIsNotifOpen(false)}
-                            />
-                            <motion.div
-                              className="notif-popover glass-panel mobile-bottom-sheet"
-                              initial={{ y: "100%" }}
-                              animate={{ y: 0 }}
-                              exit={{ y: "100%" }}
-                              transition={{
-                                type: "spring",
-                                damping: 25,
-                                stiffness: 200,
-                              }}
-                            >
-                              <div className="notif-header">
-                                <h3>Сповіщення</h3>
-                                <span className="notif-count">
-                                  {notifications.length}
-                                </span>
-                              </div>
-                              <div className="notif-body scrollable-area">
-                                {notifications.length === 0 ? (
-                                  <div className="notif-empty">
-                                    <Bell
-                                      size={32}
-                                      weight="duotone"
-                                      opacity={0.5}
-                                    />
-                                    <p>У вас немає нових сповіщень</p>
-                                  </div>
-                                ) : (
-                                  <>
-                                    {/* Група 1: Дедлайни (Семестр) */}
-                                    {notifications.filter(
-                                      (n) => n.type === "task",
-                                    ).length > 0 && (
-                                      <div className="notif-group">
-                                        <h5 className="notif-group-title">
-                                          Дедлайни (Семестр)
-                                        </h5>
-                                        {notifications
-                                          .filter((n) => n.type === "task")
-                                          .map((n) => (
-                                            <div
-                                              key={n.id}
-                                              className="notif-item task"
-                                            >
-                                              <div className="notif-icon">
-                                                <NotebookPen size={20} />
-                                              </div>
-                                              <div className="notif-content">
-                                                <h4>{n.title}</h4>
-                                                <p>{n.message}</p>
-                                                <span className="notif-time">
-                                                  {n.timeRemaining}
-                                                </span>
-                                              </div>
-                                            </div>
-                                          ))}
-                                      </div>
-                                    )}
-                                    {/* Група 2: Справи (Календар) */}
-                                    {notifications.filter(
-                                      (n) => n.type === "plan",
-                                    ).length > 0 && (
-                                      <div className="notif-group">
-                                        <h5 className="notif-group-title">
-                                          Заплановані події (Календар)
-                                        </h5>
-                                        {notifications
-                                          .filter((n) => n.type === "plan")
-                                          .map((n) => (
-                                            <div
-                                              key={n.id}
-                                              className="notif-item plan"
-                                            >
-                                              <div className="notif-icon">
-                                                <CalendarCheckIcon size={20} />
-                                              </div>
-                                              <div className="notif-content">
-                                                <h4>{n.title}</h4>
-                                                <p>{n.message}</p>
-                                                <span className="notif-time">
-                                                  {n.timeRemaining}
-                                                </span>
-                                              </div>
-                                            </div>
-                                          ))}
-                                      </div>
-                                    )}
-                                  </>
-                                )}
-                              </div>
-                            </motion.div>
-                          </>
-                        )}
-                      </AnimatePresence>
+                     {/* Спливаюче вікно для мобілки (Виїжджає знизу) */}
+<AnimatePresence>
+  {isNotifOpen && (
+    <>
+      {/* Затемнення фону на мобілці */}
+      <motion.div
+        className="mobile-notif-backdrop"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={() => setIsNotifOpen(false)}
+      />
+      <motion.div
+        className="notif-popover glass-panel mobile-bottom-sheet"
+        initial={{ y: "100%" }}
+        animate={{ y: 0 }}
+        exit={{ y: "100%" }}
+        transition={{
+          type: "spring",
+          damping: 25,
+          stiffness: 200,
+        }}
+      >
+        {/* Хедер вікна */}
+        <div className="notif-header">
+          <h3>Сповіщення</h3>
+          <span className="notif-count">
+            {filteredNotifications.length}
+          </span>
+        </div>
+
+        {/* КАТЕГОРІЇ СПОВІЩЕНЬ (ФІЛЬТРИ ДЛЯ МОБІЛКИ) */}
+        <div className="notif-filters">
+          <button
+            className={`notif-filter-btn ${notifFilter === "all" ? "active" : ""}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setNotifFilter("all");
+            }}
+          >
+            Всі
+          </button>
+          <button
+            className={`notif-filter-btn ${notifFilter === "task" ? "active" : ""}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setNotifFilter("task");
+            }}
+          >
+            Семестр
+          </button>
+          <button
+            className={`notif-filter-btn ${notifFilter === "plan" ? "active" : ""}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setNotifFilter("plan");
+            }}
+          >
+            Календар
+          </button>
+        </div>
+
+        {/* Тіло вікна з динамічним списком */}
+        <div className="notif-body scrollable-area">
+          {filteredNotifications.length === 0 ? (
+            <div className="notif-empty">
+              <Bell
+                size={32}
+                weight="duotone"
+                opacity={0.5}
+              />
+              <p>Немає сповіщень у цій категорії</p>
+            </div>
+          ) : (
+            filteredNotifications.map((n) => (
+              <div
+                key={n.id}
+                className={`notif-item ${n.type}`}
+              >
+                <div className="notif-icon">
+                  {n.type === "task" ? (
+                    <NotebookPen size={20} />
+                  ) : (
+                    <CalendarCheckIcon size={20} />
+                  )}
+                </div>
+                <div className="notif-content">
+                  <h4>{n.title}</h4>
+                  <p>{n.message}</p>
+                  <span className="notif-time">
+                    {n.timeRemaining}
+                  </span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </motion.div>
+    </>
+  )}
+</AnimatePresence>
                     </div>
                   )}
 

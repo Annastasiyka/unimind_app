@@ -32,7 +32,6 @@ interface UserData {
   email: string;
 }
 
-// Додано інтерфейс для планів, щоб типізувати взаємодію з календарем
 interface Plan {
   id: number | string;
   text: string;
@@ -41,6 +40,9 @@ interface Plan {
   type: string;
   time?: string;
   origin?: string;
+  taskId?: string;     
+  subjectId?: string;   
+  maxScore?: number;  
 }
 
 interface DashboardProps {
@@ -83,8 +85,8 @@ interface Semester {
   isArchived?: boolean;
 }
 
-const determineStatus = (deadline?: string, score?: number | null): TaskStatus => {
-  if (score !== null && score !== undefined) return "Здано";
+const determineStatus = (deadline?: string, score?: number | null | string): TaskStatus => {
+  if (score !== null && score !== undefined && score !== "") return "Здано";
   if (!deadline) return "В процесі";
   return "Має дедлайн";
 };
@@ -157,7 +159,39 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
 
       const key = getStorageKey(guestStatus, storedUser);
       const allSemesters: Semester[] = (await localforage.getItem(key)) || [];
-      const currentSem = allSemesters.find((s) => s.id === semesterId);
+      
+      let hasChanges = false;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const updatedSemesters = allSemesters.map(sem => {
+        const updatedSubjects = sem.subjects.map(subj => {
+          const updatedTasks = subj.tasks.map(task => {
+            if ((task.score === null || (task.score as unknown) === "") && task.deadline) {
+              const taskDeadline = new Date(task.deadline);
+              taskDeadline.setHours(0, 0, 0, 0);
+              
+              if (today > taskDeadline) {
+                hasChanges = true;
+                return { 
+                  ...task, 
+                  score: task.maxScore / 2, 
+                  status: "Здано" as TaskStatus 
+                };
+              }
+            }
+            return task;
+          });
+          return { ...subj, tasks: updatedTasks };
+        });
+        return { ...sem, subjects: updatedSubjects };
+      });
+
+      if (hasChanges) {
+        await localforage.setItem(key, updatedSemesters);
+      }
+
+      const currentSem = updatedSemesters.find((s) => s.id === semesterId);
 
       if (currentSem) {
         setSubjects(currentSem.subjects || []);
@@ -255,7 +289,6 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
     setIsSubjectModalOpen(false); setEditingSubjectId(null);
   };
 
-  // Перетворено на async для доступу до localforage
   const handleSaveTask = async () => {
     if (isArchived || !activeSubject) return;
     setErrorMsg("");
@@ -311,7 +344,6 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
     setExpandedGroups((prev) => ({ ...prev, [newTaskType]: true }));
     setIsTaskModalOpen(false);
 
-    // --- ІНТЕГРАЦІЯ З КАЛЕНДАРЕМ ---
     if (newTaskDeadline) {
       try {
         const guestStatus = (await localforage.getItem("isGuest")) === "true";
@@ -320,7 +352,6 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
         
         const existingPlans: Plan[] = (await localforage.getItem(plansKey)) || [];
         
-        // Перетворюємо дедлайн у формат CalendarPage: D-M-YYYY (місяці 0-11)
         const d = new Date(newTaskDeadline);
         const formattedDate = `${d.getDate()}-${d.getMonth()}-${d.getFullYear()}`;
         
@@ -338,27 +369,34 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
           else if (newTaskType === "Індивідуальна робота") typeStr = "індивідуальної роботи";
           else if (newTaskType === "Розрахункові роботи") typeStr = "розрахункової роботи";
 
-          
           planText = `Здача ${typeStr} з ${activeSubject.name} (${finalTaskName})`;
         } else {
           planText = `${newTaskType} з ${activeSubject.name}  (${finalTaskName})`;
         }
         
-        const existingPlanIndex = existingPlans.findIndex(p => p.text === planText);
+      const existingPlanIndex = existingPlans.findIndex(p => p.taskId === savedTask.id || p.text === planText);
         
         if (existingPlanIndex !== -1) {
+          existingPlans[existingPlanIndex].text = planText; 
+          
           existingPlans[existingPlanIndex].date = formattedDate;
           existingPlans[existingPlanIndex].type = calendarType;
+          existingPlans[existingPlanIndex].origin = "semester";            
+          existingPlans[existingPlanIndex].taskId = savedTask.id;          
+          existingPlans[existingPlanIndex].subjectId = activeSubjectId!;   
+          existingPlans[existingPlanIndex].maxScore = finalMaxScore;       
         } else {
-         
-        existingPlans.push({
-          id: crypto.randomUUID(), 
-          text: planText,
-          completed: false,
-          date: formattedDate,
-          type: calendarType,
-          origin: "semester"
-        });
+          existingPlans.push({
+            id: crypto.randomUUID(), 
+            text: planText,
+            completed: false,
+            date: formattedDate,
+            type: calendarType,
+            origin: "semester",
+            taskId: savedTask.id,           
+            subjectId: activeSubjectId!,    
+            maxScore: finalMaxScore         
+          });
         }
         
         await localforage.setItem(plansKey, existingPlans);
@@ -368,17 +406,48 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
     }
   };
 
+  // --- ДОДАНО ФУНКЦІЮ ВИДАЛЕННЯ ЗАВДАННЯ ТА СИНХРОНІЗАЦІЇ З КАЛЕНДАРЕМ ---
+  const handleDeleteTask = async (subjectId: string, taskId: string) => {
+    if (isArchived) return;
+
+    // 1. Видаляємо завдання зі списку предметів семестру
+    const updated = subjects.map((subj) => 
+      subj.id === subjectId 
+        ? { ...subj, tasks: subj.tasks.filter((x) => x.id !== taskId) } 
+        : subj
+    ); 
+    setSubjects(updated); 
+    await syncWithGlobalStorage(updated); 
+
+    // 2. Видаляємо зв'язане завдання з планів календаря в localforage
+    try {
+      const guestStatus = (await localforage.getItem("isGuest")) === "true";
+      const storedUser = await localforage.getItem<UserData>("userData");
+      const plansKey = guestStatus ? "unimind-plans-guest" : `unimind-plans-${storedUser?.name || "user"}`;
+      
+      const existingPlans: Plan[] = (await localforage.getItem(plansKey)) || [];
+      // Фільтруємо плани за taskId
+      const filteredPlans = existingPlans.filter((p) => p.taskId !== taskId);
+      
+      await localforage.setItem(plansKey, filteredPlans);
+      // ПРИМІТКА: Зміна стану subjects триггерне існуючий useEffect-синхронізатор,
+      // який через 1 сек візьме ці оновлені filteredPlans з localforage та запише в БД.
+    } catch (error) {
+      console.error("Помилка при видаленні завдання з календаря:", error);
+    }
+  };
+
   const handleNumberChange = (value: string, setter: (val: number | "") => void) => {
     const cleaned = value.replace(/[^0-9]/g, "");
     setter(cleaned === "" ? "" : Number(cleaned));
   };
 
-  if (isLoading) return <div className="loading-screen">Завантаження...</div>;
-
-  return (
+  if (isLoading) return <div className="loading-screen"></div>;
+  
+return (
     <motion.div className="dashboard-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       
-     {/* ДЕСКТОПНА НАВІГАЦІЯ */}
+      {/* ДЕСКТОПНА НАВІГАЦІЯ */}
       {!isMobile && (
         <div 
           className="dashboard-header-block desktop-only" 
@@ -457,105 +526,96 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
                                   <CaretDown size={16} className={`mu-group-arrow ${isGroupOpen ? "open" : ""}`} />
                                 </div>
                                 <AnimatePresence>
-  {isGroupOpen && (
-    <motion.div 
-      initial={{ height: 0, opacity: 0 }} 
-      animate={{ height: "auto", opacity: 1 }} 
-      exit={{ height: 0, opacity: 0 }}
-      style={{ overflow: 'hidden' }}
-    >
-      {tasks.map(t => (
-        <div key={t.id} className="mu-task-row">
-          
-          <div className="col-name" style={{ marginLeft: "10px" }}>
-            {t.name}
-          </div>
+                                  {isGroupOpen && (
+                                    <motion.div 
+                                      initial={{ height: 0, opacity: 0 }} 
+                                      animate={{ height: "auto", opacity: 1 }} 
+                                      exit={{ height: 0, opacity: 0 }}
+                                      style={{ overflow: 'hidden' }}
+                                    >
+                                      {tasks.map(t => (
+                                        <div key={t.id} className="mu-task-row">
+                                          
+                                          <div className="col-name" style={{ marginLeft: "10px" }}>
+                                            {t.name}
+                                          </div>
 
-          <div className="col-status">
-            <span className={`status-badge ${getStatusClass(t.status)}`}>
-              {t.status}
-            </span>
-          </div>
+                                          <div className="col-status">
+                                            <span className={`status-badge ${getStatusClass(t.status)}`}>
+                                              {t.status}
+                                            </span>
+                                          </div>
 
-          <div className="col-score" style={{ fontSize: '14px' }}>
-            <input 
-              type="text" 
-              disabled={isArchived} 
-              className="score-edit-input" 
-              style={{ 
-                width: t.score === null ? "1.5ch" : `${t.score.toString().length + 0.5}ch`,
-                textAlign: 'right',
-                background: 'transparent',
-                border: 'none',
-                color: 'inherit',
-                font: 'inherit',
-                fontWeight: '600',
-                outline: 'none'
-              }} 
-              value={t.score === null ? "-" : t.score} 
-              onChange={(e) => {
-                if (isArchived) return;
-                const val = e.target.value.replace(/[^0-9]/g, "");
-                const num = val === "" ? null : Math.min(Number(val), t.maxScore);
-                
-                const updated = subjects.map(subj => 
-                  subj.id === s.id ? { 
-                    ...subj, 
-                    tasks: subj.tasks.map(x => x.id === t.id ? { 
-                      ...x, 
-                      score: num, 
-                      status: determineStatus(x.deadline, num) 
-                    } : x) 
-                  } : subj
-                );
-                
-                setSubjects(updated); 
-                syncWithGlobalStorage(updated);
-              }} 
-            />
-            <span style={{ opacity: 0.6, marginLeft: '2px' }}>/ {t.maxScore}</span>
-          </div>
+                                          <div className="col-score" style={{ fontSize: '14px' }}>
+                                            <input 
+                                              type="text" 
+                                              disabled={isArchived} 
+                                              className="score-edit-input" 
+                                              style={{ 
+                                                width: t.score === null ? "1.5ch" : `${t.score.toString().length + 0.5}ch`,
+                                                textAlign: 'right',
+                                                background: 'transparent',
+                                                border: 'none',
+                                                color: 'inherit',
+                                                font: 'inherit',
+                                                fontWeight: '600',
+                                                outline: 'none'
+                                              }} 
+                                              value={t.score === null ? "-" : t.score} 
+                                              onChange={(e) => {
+                                                if (isArchived) return;
+                                                const val = e.target.value.replace(/[^0-9]/g, "");
+                                                const num = val === "" ? null : Math.min(Number(val), t.maxScore);
+                                                
+                                                const updated = subjects.map(subj => 
+                                                  subj.id === s.id ? { 
+                                                    ...subj, 
+                                                    tasks: subj.tasks.map(x => x.id === t.id ? { 
+                                                      ...x, 
+                                                      score: num, 
+                                                      status: determineStatus(x.deadline, num) 
+                                                    } : x) 
+                                                  } : subj
+                                                );
+                                                
+                                                setSubjects(updated); 
+                                                syncWithGlobalStorage(updated);
+                                              }} 
+                                            />
+                                            <span style={{ opacity: 0.6, marginLeft: '2px' }}>/ {t.maxScore}</span>
+                                          </div>
 
-          <div className="mu-task-actions">
-            {!isArchived && (
-              <>
-                <PencilSimple 
-                  size={18} 
-                  weight="duotone" 
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => { 
-                    setEditingTaskId(t.id); 
-                    setNewTaskType(t.type); 
-                    setNewTaskName(t.type === "Курсова робота" ? "" : t.name); 
-                    setNewTaskMaxScore(t.maxScore); 
-                    setNewTaskCredits(t.credits || ""); 
-                    setNewTaskDeadline(t.deadline || ""); 
-                    setIsTaskModalOpen(true); 
-                  }} 
-                />
-                <Trash 
-                  size={18} 
-                  weight="duotone" 
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => { 
-                    const u = subjects.map(subj => 
-                      subj.id === s.id ? { 
-                        ...subj, 
-                        tasks: subj.tasks.filter(x => x.id !== t.id) 
-                      } : subj
-                    ); 
-                    setSubjects(u); 
-                    syncWithGlobalStorage(u); 
-                  }} 
-                />
-              </>
-            )}
-          </div>
-        </div>
-      ))}
-    </motion.div>
-  )}
-</AnimatePresence>
+                                          <div className="mu-task-actions">
+                                            {!isArchived && (
+                                              <>
+                                                <PencilSimple 
+                                                  size={18} 
+                                                  weight="duotone" 
+                                                  style={{ cursor: 'pointer' }}
+                                                  onClick={() => { 
+                                                    setEditingTaskId(t.id); 
+                                                    setNewTaskType(t.type); 
+                                                    setNewTaskName(t.type === "Курсова робота" ? "" : t.name); 
+                                                    setNewTaskMaxScore(t.maxScore); 
+                                                    setNewTaskCredits(t.credits || ""); 
+                                                    setNewTaskDeadline(t.deadline || ""); 
+                                                    setIsTaskModalOpen(true); 
+                                                  }} 
+                                                />
+                                                <Trash 
+                                                  size={18} 
+                                                  weight="duotone" 
+                                                  style={{ cursor: 'pointer' }}
+                                                  onClick={() => handleDeleteTask(s.id, t.id)} 
+                                                />
+                                              </>
+                                            )}
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
                               </div>
                             );
                           })}
@@ -644,7 +704,14 @@ export const SemesterDashboard = ({ semesterId, setCurrentScreen }: DashboardPro
                                     }} 
                                   /> / {t.maxScore}
                                 </div>
-                                <div className="col-actions">{!isArchived && <><PencilSimple size={18} weight="duotone" className="dash-action-icon" onClick={() => { setEditingTaskId(t.id); setNewTaskType(t.type); setNewTaskName(t.type === "Курсова робота" ? "" : t.name); setNewTaskMaxScore(t.maxScore); setNewTaskCredits(t.credits || ""); setNewTaskDeadline(t.deadline || ""); setIsTaskModalOpen(true); }} /><Trash size={18} weight="duotone" className="dash-action-icon" onClick={() => { const u = subjects.map(s => s.id === activeSubjectId ? { ...s, tasks: s.tasks.filter(x => x.id !== t.id) } : s); setSubjects(u); syncWithGlobalStorage(u); }} /></>}</div>
+                                <div className="col-actions">
+                                  {!isArchived && (
+                                    <>
+                                      <PencilSimple size={18} weight="duotone" className="dash-action-icon" onClick={() => { setEditingTaskId(t.id); setNewTaskType(t.type); setNewTaskName(t.type === "Курсова робота" ? "" : t.name); setNewTaskMaxScore(t.maxScore); setNewTaskCredits(t.credits || ""); setNewTaskDeadline(t.deadline || ""); setIsTaskModalOpen(true); }} />
+                                      <Trash size={18} weight="duotone" className="dash-action-icon" onClick={() => handleDeleteTask(activeSubjectId!, t.id)} />
+                                    </>
+                                  )}
+                                </div>
                               </div>
                             ))}
                           </motion.div>

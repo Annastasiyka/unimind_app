@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import localforage from "localforage";
 import { motion } from "framer-motion";
 
+// 1. ОНОВЛЕНИЙ ІНТЕРФЕЙС ПЛАНУ
 interface Plan {
   id: number | string;
   text: string;
@@ -10,12 +11,41 @@ interface Plan {
   type: string;
   time?: string;
   origin?: string;
+  taskId?: string;      // Прив'язка до завдання в семестрі
+  subjectId?: string;   // Прив'язка до предмета в семестрі
+  maxScore?: number;    // Максимальний бал
 }
 
 interface UserData {
   id: number;
   name: string;
   email: string;
+}
+
+// 2. ДОДАНІ ІНТЕРФЕЙСИ СЕМЕСТРУ ДЛЯ TYPESCRIPT (щоб уникнути помилок any)
+interface Task {
+  id: string;
+  name: string;
+  type: string;
+  status: string;
+  score: number | null;
+  maxScore: number;
+  deadline?: string;
+  credits?: number;
+}
+
+interface Subject {
+  id: string;
+  name: string;
+  credits: number;
+  tasks: Task[];
+}
+
+interface Semester {
+  id: string;
+  name?: string;
+  subjects: Subject[];
+  isArchived?: boolean;
 }
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
@@ -38,30 +68,21 @@ export const CalendarPage = () => {
   const [planType, setPlanType] = useState("Особисте");
   const [planTime, setPlanTime] = useState("");
 
-  const [editingPlanId, setEditingPlanId] = useState<number | string | null>(
-    null,
-  );
+  const [editingPlanId, setEditingPlanId] = useState<number | string | null>(null);
   const [editText, setEditText] = useState("");
   const [editType, setEditType] = useState("Особисте");
   const [editTime, setEditTime] = useState("");
 
   const pickerRef = useRef<HTMLDivElement>(null);
   const categories = ["Особисте", "Навчання", "Лабораторна", "Робота"];
-  const hours = Array.from({ length: 24 }, (_, i) =>
-    i.toString().padStart(2, "0"),
-  );
-  const minutes = Array.from({ length: 12 }, (_, i) =>
-    (i * 5).toString().padStart(2, "0"),
-  );
+  const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, "0"));
+  const minutes = Array.from({ length: 12 }, (_, i) => (i * 5).toString().padStart(2, "0"));
 
-  const viewYear = currentDate.getFullYear();
-  const viewMonth = currentDate.getMonth();
-  const dateKey =
-    selectedDayPlans !== null
-      ? `${selectedDayPlans}-${viewMonth}-${viewYear}`
-      : "";
+ const viewYear = currentDate.getFullYear();
+const viewMonth = currentDate.getMonth();
+const dateKey = selectedDayPlans !== null ? `${selectedDayPlans}-${viewMonth + 1}-${viewYear}` : "";
 
-  useEffect(() => {
+useEffect(() => {
     const initCalendar = async () => {
       const guestStatus = (await localforage.getItem("isGuest")) === "true";
       const storedUser = await localforage.getItem<UserData>("userData");
@@ -78,11 +99,7 @@ export const CalendarPage = () => {
         setPlans(savedPlans);
       }
 
-      if (
-        !guestStatus &&
-        storedUser?.id &&
-        (!savedPlans || savedPlans.length === 0)
-      ) {
+      if (!guestStatus && storedUser?.id && (!savedPlans || savedPlans.length === 0)) {
         try {
           const response = await fetch(`${API_URL}/profile/${storedUser.id}`);
           const dbData = await response.json();
@@ -98,9 +115,36 @@ export const CalendarPage = () => {
     };
 
     initCalendar();
+
+    // ДОДАНО: Календар слухає, чи не змінив щось Планер (ШІ)
+    const handleExternalUpdate = async () => {
+      const guestStatus = (await localforage.getItem("isGuest")) === "true";
+      const storedUser = await localforage.getItem<UserData>("userData");
+      const storageKey = guestStatus
+        ? "unimind-plans-guest"
+        : `unimind-plans-${storedUser?.name || "user"}`;
+        
+      const savedPlans = await localforage.getItem<Plan[]>(storageKey);
+      if (savedPlans) {
+        // Запобігаємо нескінченному циклу: оновлюємо тільки якщо плани РЕАЛЬНО змінилися
+        setPlans((currentPlans) => {
+          if (JSON.stringify(currentPlans) !== JSON.stringify(savedPlans)) {
+            return savedPlans;
+          }
+          return currentPlans;
+        });
+      }
+    };
+
+    window.addEventListener("plansUpdated", handleExternalUpdate);
+    
+    // Очищення слухача при закритті сторінки
+    return () => {
+      window.removeEventListener("plansUpdated", handleExternalUpdate);
+    };
   }, []);
 
-  useEffect(() => {
+ useEffect(() => {
     if (isLoading) return;
 
     const syncWithStorage = async () => {
@@ -110,11 +154,12 @@ export const CalendarPage = () => {
 
       await localforage.setItem(storageKey, plans);
 
+      window.dispatchEvent(new Event("plansUpdated"));
+
       if (!isGuest && userData?.id) {
         try {
           const semestersKey = `unimind-semesters-${userData.name}`;
-          const currentSemesters =
-            (await localforage.getItem(semestersKey)) || [];
+          const currentSemesters = (await localforage.getItem(semestersKey)) || [];
 
           await fetch(`${API_URL}/sync/all`, {
             method: "POST",
@@ -137,29 +182,21 @@ export const CalendarPage = () => {
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (
-        pickerRef.current &&
-        !pickerRef.current.contains(event.target as Node)
-      ) {
+      if (pickerRef.current && !pickerRef.current.contains(event.target as Node)) {
         setIsPickerOpen(false);
         setPickerStep("year");
       }
     };
-    if (isPickerOpen)
-      document.addEventListener("mousedown", handleClickOutside);
+    if (isPickerOpen) document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isPickerOpen]);
 
   const getCategoryClass = (type: string) => {
     switch (type) {
-      case "Навчання":
-        return "cat-study";
-      case "Лабораторна":
-        return "cat-lab";
-      case "Робота":
-        return "cat-work";
-      default:
-        return "cat-personal";
+      case "Навчання": return "cat-study";
+      case "Лабораторна": return "cat-lab";
+      case "Робота": return "cat-work";
+      default: return "cat-personal";
     }
   };
 
@@ -197,29 +234,136 @@ export const CalendarPage = () => {
   const saveEdit = (id: number | string) => {
     setPlans(
       plans.map((p) =>
-        p.id === id
-          ? { ...p, text: editText, type: editType, time: editTime }
-          : p,
+        p.id === id ? { ...p, text: editText, type: editType, time: editTime } : p,
       ),
     );
     setEditingPlanId(null);
   };
 
-  const togglePlan = (id: number | string) =>
-    setPlans(
-      plans.map((p) => (p.id === id ? { ...p, completed: !p.completed } : p)),
-    );
+  // 3. ОНОВЛЕНА ЛОГІКА: TOGGLE PLAN + СИНХРОНІЗАЦІЯ ОЦІНОК СЕМЕСТРУ
+  const togglePlan = async (id: number | string) => {
+    const planToToggle = plans.find((p) => p.id === id);
+    if (!planToToggle) return;
 
-  const deletePlan = (id: number | string) =>
+    const newCompleted = !planToToggle.completed;
+    
+    setPlans(plans.map((p) => (p.id === id ? { ...p, completed: newCompleted } : p)));
+
+    if (planToToggle.origin === "semester" && planToToggle.taskId && planToToggle.subjectId) {
+      try {
+        const guestStatus = (await localforage.getItem("isGuest")) === "true";
+        const storedUser = await localforage.getItem<UserData>("userData");
+        const semestersKey = guestStatus ? "unimind-semesters-guest" : `unimind-semesters-${storedUser?.name || "user"}`;
+        
+        const semesters: Semester[] = (await localforage.getItem(semestersKey)) || [];
+        let isChanged = false;
+
+        const updatedSemesters = semesters.map(sem => ({
+          ...sem,
+          subjects: sem.subjects.map(subj => {
+            if (subj.id === planToToggle.subjectId) {
+              return {
+                ...subj,
+                tasks: subj.tasks.map(task => {
+                  if (task.id === planToToggle.taskId) {
+                    isChanged = true;
+                    
+                    let calculatedScore = planToToggle.maxScore || task.maxScore || 0;
+                    
+                    if (task.deadline) {
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      const taskDeadline = new Date(task.deadline);
+                      taskDeadline.setHours(0, 0, 0, 0);
+                      
+                      if (today > taskDeadline) {
+                        calculatedScore = calculatedScore / 2;
+                      }
+                    }
+
+                    const isScoreEmpty = task.score === null || (task.score as unknown) === "";
+                    
+                    const newScore = newCompleted 
+                      ? (!isScoreEmpty ? task.score : calculatedScore)
+                      : null;
+                      
+                    return {
+                      ...task,
+                      score: newScore,
+                      status: newCompleted ? "Здано" : (task.deadline ? "Має дедлайн" : "В процесі")
+                    };
+                  }
+                  return task;
+                })
+              };
+            }
+            return subj;
+          })
+        }));
+
+        if (isChanged) {
+          await localforage.setItem(semestersKey, updatedSemesters);
+        }
+      } catch (err) {
+        console.error("Помилка синхронізації оцінки з семестром:", err);
+      }
+    }
+  };
+
+  // --- ОНОВЛЕНА ФУНКЦІЯ ВИДАЛЕННЯ: ОЧИЩАЄ ТАКОЖ І ЗВ'ЯЗОК У СЕМЕСТРАХ ---
+  const deletePlan = async (id: number | string) => {
+    const planToDelete = plans.find((p) => p.id === id);
+    if (!planToDelete) return;
+
+    // Видаляємо з локального стейту календаря
     setPlans(plans.filter((p) => p.id !== id));
 
-  const monthLabel = new Intl.DateTimeFormat("uk-UA", { month: "long" }).format(
-    currentDate,
-  );
+    // Якщо це системне завдання з дедлайном із семестру
+    if (planToDelete.origin === "semester" && planToDelete.taskId && planToDelete.subjectId) {
+      try {
+        const guestStatus = (await localforage.getItem("isGuest")) === "true";
+        const storedUser = await localforage.getItem<UserData>("userData");
+        const semestersKey = guestStatus ? "unimind-semesters-guest" : `unimind-semesters-${storedUser?.name || "user"}`;
+
+        const semesters: Semester[] = (await localforage.getItem(semestersKey)) || [];
+        let isChanged = false;
+
+        // Повертаємо оцінку до початкового стану (null) та скидаємо статус
+        const updatedSemesters = semesters.map((sem) => ({
+          ...sem,
+          subjects: sem.subjects.map((subj) => {
+            if (subj.id === planToDelete.subjectId) {
+              return {
+                ...subj,
+                tasks: subj.tasks.map((task) => {
+                  if (task.id === planToDelete.taskId) {
+                    isChanged = true;
+                    return {
+                      ...task,
+                      score: null, // Скидаємо бали
+                      status: task.deadline ? "Має дедлайн" : "В процесі" // Повертаємо статус
+                    };
+                  }
+                  return task;
+                })
+              };
+            }
+            return subj;
+          })
+        }));
+
+        if (isChanged) {
+          await localforage.setItem(semestersKey, updatedSemesters);
+        }
+      } catch (err) {
+        console.error("Помилка при скиданні зв'язаного завдання з семестру:", err);
+      }
+    }
+  };
+
+  const monthLabel = new Intl.DateTimeFormat("uk-UA", { month: "long" }).format(currentDate);
   const allMonths = Array.from({ length: 12 }, (_, i) =>
-    new Intl.DateTimeFormat("uk-UA", { month: "long" }).format(
-      new Date(2026, i, 1),
-    ),
+    new Intl.DateTimeFormat("uk-UA", { month: "long" }).format(new Date(2026, i, 1))
   );
 
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
@@ -227,8 +371,7 @@ export const CalendarPage = () => {
   if (firstDayIndex === -1) firstDayIndex = 6;
   const weekDays = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"];
 
-  const changeMonth = (offset: number) =>
-    setCurrentDate(new Date(viewYear, viewMonth + offset, 1));
+  const changeMonth = (offset: number) => setCurrentDate(new Date(viewYear, viewMonth + offset, 1));
 
   const handleYearClick = (year: number) => {
     setTempYear(year);
@@ -249,7 +392,7 @@ export const CalendarPage = () => {
       viewYear === today.getFullYear()
     );
   };
-
+  
   if (isLoading)
     return <div className="calendar-page" style={{ opacity: 0 }} />;
 
@@ -394,8 +537,8 @@ export const CalendarPage = () => {
               <div key={`empty-${i}`} style={{ height: "100px" }}></div>
             ))}
             {Array.from({ length: daysInMonth }).map((_, i) => {
-              const dayNumber = i + 1;
-              const dateStr = `${dayNumber}-${viewMonth}-${viewYear}`;
+             const dayNumber = i + 1;
+const dateStr = `${dayNumber}-${viewMonth + 1}-${viewYear}`;
               const plansForThisDay = plans
                 .filter((p) => p.date === dateStr && !p.completed)
                 .sort((a, b) => (a.time || "").localeCompare(b.time || ""));

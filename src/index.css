@@ -4704,7 +4704,6 @@ input[type="number"] {
   font-size: 16px;
 }
 
-/* Блок завантаження / тайпінгу ШІ */
 .ai-typing {
   display: flex;
   align-items: center;
@@ -6000,6 +5999,64 @@ grid-template-columns: minmax(0, 1fr) 1.2fr 0.8fr 50px;  align-items: center;
     height: 42px !important;
     padding: 0 15px !important;
   }
+  
+          .planner-container {
+            flex-direction: column;
+            height: auto;
+            min-height: 100vh;
+            overflow-y: auto;
+            padding: 10px;
+          }
+          
+          .planner-main {
+            width: 100%;
+            height: auto;
+            min-height: 65vh;
+          }
+          
+          .planner-sidebar {
+            width: 100% !important;
+            height: 50vh;
+            margin-top: 15px;
+            border-left: none !important;
+            border-top: 1px solid rgba(150, 117, 227, 0.1);
+            padding-top: 15px;
+          }
+          
+          .planner-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 12px;
+          }
+          
+          .planner-controls {
+            flex-direction: column;
+            width: 100%;
+            gap: 10px;
+          }
+          
+          .view-toggle-new, .date-navigator-new {
+            width: 100% !important;
+            display: flex;
+            justify-content: space-between;
+          }
+          
+          .toggle-btn-new {
+            flex: 1;
+            text-align: center;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+          }
+          
+          .day-task-card {
+            padding: 0 10px !important;
+          }
+          
+          .day-task-card div {
+            font-size: 13px !important;
+          }
+        
 }
 
 @media (max-width: 300px) {

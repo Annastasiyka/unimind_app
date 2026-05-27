@@ -66,21 +66,35 @@ export const AIPlanerPage = () => {
   
   const chatEndRef = useRef<HTMLDivElement>(null);
   const lastAutoProcessedRef = useRef<string>("");
+  const [isGuestMode, setIsGuestMode] = useState(false);
 
-  useEffect(() => {
+useEffect(() => {
     const initPlanner = async () => {
       const storedUser = await localforage.getItem<UserData>("userData");
       setUserData(storedUser);
       const isGuest = (await localforage.getItem("isGuest")) === "true";
+      setIsGuestMode(isGuest); 
       const nameKey = isGuest ? "Гість" : (storedUser?.name || "user");
       const plansKey = isGuest ? "unimind-plans-guest" : `unimind-plans-${nameKey}`;
+      const scheduleKey = isGuest ? "unimind-schedule-guest" : `unimind-schedule-${nameKey}`;
 
       const localPlans = await localforage.getItem<Plan[]>(plansKey);
       if (localPlans) {
         setAllPlans(localPlans.map(p => ({ ...p, date: normalizeDate(p.date) })));
       }
 
-      if (!isGuest && storedUser?.id) {
+      if (isGuest) {
+        let localSchedule = await localforage.getItem<WorkSchedule>(scheduleKey);
+        if (!localSchedule) {
+          const savedTimes = await localforage.getItem<Record<string, string>>(`unimind-work-times-Гість`) || {};
+          const savedDays = await localforage.getItem<Record<string, boolean>>(`unimind-active-days-Гість`) || {
+            "Понеділок": true, "Вівторок": true, "Середа": true, "Четвер": true, "П'ятниця": true, "Субота": false, "Неділя": false
+          };
+          localSchedule = { times: savedTimes, days: savedDays };
+        }
+        setWorkSchedule(localSchedule);
+      } 
+      else if (storedUser?.id) {
         try {
           const response = await fetch(`${API_URL}/profile/${storedUser.id}`);
           const dbData = await response.json();
@@ -92,7 +106,12 @@ export const AIPlanerPage = () => {
               await localforage.setItem(plansKey, normalized);
             }
             if (dbData.chatHistory && dbData.chatHistory.length > 0) {
-              setMessages(dbData.chatHistory);
+              const validHistory = dbData.chatHistory.filter((m: ChatMessage) => m.text && m.text.trim() !== "");
+              if (validHistory.length > 0) {
+                setMessages(validHistory);
+              } else {
+                setMessages([{ id: `ai-init-${Date.now()}`, role: "ai", text: "Привіт! Твої плани завантажено. Я стежу за новими завданнями! ✨" }]);
+              }
             } else {
               setMessages([{ id: `ai-init-${Date.now()}`, role: "ai", text: "Привіт! Твої плани завантажено. Я стежу за новими завданнями! ✨" }]);
             }
@@ -102,13 +121,37 @@ export const AIPlanerPage = () => {
     };
     initPlanner();
 
+    const handleScheduleUpdate = () => { initPlanner(); };
+    window.addEventListener("scheduleUpdated", handleScheduleUpdate);
+
+    // ---------------------------------------------------------------------------------
+    // ЗМІНЕНО: Слухач тепер бере дані з localforage, уникаючи повторного запиту до сервера
+    const handlePlansUpdate = async () => {
+      const isGuest = (await localforage.getItem("isGuest")) === "true";
+      const storedUser = await localforage.getItem<UserData>("userData");
+      const nameKey = isGuest ? "Гість" : (storedUser?.name || "user");
+      const plansKey = isGuest ? "unimind-plans-guest" : `unimind-plans-${nameKey}`;
+      
+      const localPlans = await localforage.getItem<Plan[]>(plansKey);
+      if (localPlans) {
+        setAllPlans(localPlans.map(p => ({ ...p, date: normalizeDate(p.date) })));
+      }
+    };
+    window.addEventListener("plansUpdated", handlePlansUpdate);
+    // ---------------------------------------------------------------------------------
+
     const updateTime = () => {
       const now = new Date();
       setCurrentHour(now.getHours().toString().padStart(2, '0') + ":00");
     };
     updateTime();
     const interval = setInterval(updateTime, 60000);
-    return () => clearInterval(interval);
+    
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("scheduleUpdated", handleScheduleUpdate);
+      window.removeEventListener("plansUpdated", handlePlansUpdate);
+    };
   }, []);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
@@ -120,33 +163,7 @@ export const AIPlanerPage = () => {
       return d;
     });
   }, [baseDate]);
-
-  const hoursGrid = useMemo(() => {
-    let startH = 8, endH = 22;
-    if (workSchedule) {
-      if (viewMode === "day") {
-        const dayName = ukDaysMap[baseDate.getDay()];
-        const from = workSchedule.times[`${dayName}-from`];
-        const to = workSchedule.times[`${dayName}-to`];
-        if (from) startH = parseInt(from.split(":")[0]);
-        if (to) endH = parseInt(to.split(":")[0]);
-      } else {
-        let min = 24, max = 0, found = false;
-        ukDaysMap.forEach(d => {
-          if (workSchedule.days[d]) {
-            found = true;
-            const f = parseInt((workSchedule.times[`${d}-from`] || "09:00").split(":")[0]);
-            const t = parseInt((workSchedule.times[`${d}-to`] || "17:00").split(":")[0]);
-            if (f < min) min = f; if (t > max) max = t;
-          }
-        });
-        if (found) { startH = Math.max(0, min - 1); endH = Math.min(23, max + 1); }
-      }
-    }
-    return Array.from({ length: Math.max(1, endH - startH + 1) }, (_, i) => (startH + i).toString().padStart(2, '0') + ":00");
-  }, [workSchedule, viewMode, baseDate]);
-
-  const plannerTasks: PlannerTask[] = useMemo(() => {
+const plannerTasks: PlannerTask[] = useMemo(() => {
     const mapCat = (t: string): "study" | "lab" | "work" | "personal" | "wellness" => {
       const type = t?.toLowerCase();
       if (type === "навчання") return "study";
@@ -173,10 +190,59 @@ export const AIPlanerPage = () => {
       });
   }, [allPlans]);
 
+const hoursGrid = useMemo(() => {
+    let startH = 9, endH = 17; 
+
+    if (workSchedule) {
+      if (viewMode === "day") {
+        const dayName = ukDaysMap[baseDate.getDay()];
+        const from = workSchedule.times[`${dayName}-from`];
+        const to = workSchedule.times[`${dayName}-to`];
+        
+        if (from) startH = parseInt(from.split(":")[0]);
+        if (to) endH = parseInt(to.split(":")[0]);
+
+        const currentDayStr = normalizeDate(`${baseDate.getDate()}-${baseDate.getMonth() + 1}-${baseDate.getFullYear()}`);
+        const todaysTasks = plannerTasks.filter(t => t.dateKey === currentDayStr);
+
+        todaysTasks.forEach(task => {
+          const taskStartH = parseInt(task.timeStart.split(":")[0]);
+          const taskEndH = parseInt(task.timeEnd.split(":")[0]);
+          if (taskStartH < startH) startH = taskStartH;
+          if (taskEndH > endH) endH = taskEndH; 
+        });
+
+      } else {
+        let min = 24, max = 0, found = false;
+        ukDaysMap.forEach(d => {
+          if (workSchedule.days[d]) {
+            found = true;
+            const f = parseInt((workSchedule.times[`${d}-from`] || "09:00").split(":")[0]);
+            const t = parseInt((workSchedule.times[`${d}-to`] || "17:00").split(":")[0]);
+            if (f < min) min = f; if (t > max) max = t;
+          }
+        });
+        
+        const currentWeekStrs = currentWeekDays.map(d => normalizeDate(`${d.getDate()}-${d.getMonth() + 1}-${d.getFullYear()}`));
+        const weekTasks = plannerTasks.filter(t => currentWeekStrs.includes(t.dateKey));
+        
+        weekTasks.forEach(task => {
+          const taskStartH = parseInt(task.timeStart.split(":")[0]);
+          const taskEndH = parseInt(task.timeEnd.split(":")[0]);
+          if (taskStartH < min) min = taskStartH;
+          if (taskEndH > max) max = taskEndH;
+        });
+
+        if (found) { startH = Math.max(0, min - 1); endH = Math.min(23, max + 1); }
+      }
+    }
+    return Array.from({ length: Math.max(1, endH - startH + 1) }, (_, i) => (startH + i).toString().padStart(2, '0') + ":00");
+  }, [workSchedule, viewMode, baseDate, plannerTasks, currentWeekDays]);
+
   const unscheduledTasks = useMemo(() => {
     const datesToCheck = viewMode === "day" 
-      ? [normalizeDate(`${baseDate.getDate()}-${baseDate.getMonth()}-${baseDate.getFullYear()}`)]
-      : currentWeekDays.map(d => normalizeDate(`${d.getDate()}-${d.getMonth()}-${d.getFullYear()}`));
+      ? [normalizeDate(`${baseDate.getDate()}-${baseDate.getMonth() + 1}-${baseDate.getFullYear()}`)]
+      : currentWeekDays.map(d => normalizeDate(`${d.getDate()}-${d.getMonth() + 1}-${d.getFullYear()}`));
 
     return allPlans.filter(p => {
       if (p.completed) return false;
@@ -206,7 +272,7 @@ const triggerAutoScheduling = useCallback(async (tasksToSchedule: Plan[], target
   
   const plansForTargetDay = allPlans.filter(p => !p.completed && normalizeDate(p.date) === targetDateStr);
   const now = new Date();
-  const isToday = targetDateStr === normalizeDate(`${now.getDate()}-${now.getMonth()}-${now.getFullYear()}`);
+  const isToday = targetDateStr === normalizeDate(`${now.getDate()}-${now.getMonth() + 1}-${now.getFullYear()}`);
   const timeToPass = isToday ? now.toLocaleTimeString("uk-UA", { hour: '2-digit', minute: '2-digit' }) : "09:00";
 
   try {
@@ -214,7 +280,6 @@ const triggerAutoScheduling = useCallback(async (tasksToSchedule: Plan[], target
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ 
-        message: `Службовий запит: оптимізуй розклад на ${targetDateStr}`, 
         isAutoOptimize: true, 
         tasksToSchedule: tasksToSchedule,
         userId: userData?.id, 
@@ -226,8 +291,8 @@ const triggerAutoScheduling = useCallback(async (tasksToSchedule: Plan[], target
     });
 
     const data = await res.json();
-    const incomingPlans = data.updatedPlansForToday || data.newPlans;
-    
+const incomingPlans = data.updatedPlans || data.updatedPlansForToday || data.newPlans;
+
     if (incomingPlans && Array.isArray(incomingPlans)) {
       const normalizedIncoming = incomingPlans.map((p: Plan) => ({ ...p, date: normalizeDate(p.date) }));
       
@@ -252,7 +317,7 @@ const triggerAutoScheduling = useCallback(async (tasksToSchedule: Plan[], target
 }, [allPlans, userData, workSchedule]); 
   const handleSilentOverdueScheduling = async () => {
     setIsAutoScheduling(true);
-    const targetDateStr = normalizeDate(`${baseDate.getDate()}-${baseDate.getMonth()}-${baseDate.getFullYear()}`);
+    const targetDateStr = normalizeDate(`${baseDate.getDate()}-${baseDate.getMonth() + 1}-${baseDate.getFullYear()}`);
     const plansForTargetDay = allPlans.filter(p => !p.completed && normalizeDate(p.date) === targetDateStr);
     const now = new Date();
     const timeToPass = now.toLocaleTimeString("uk-UA", { hour: '2-digit', minute: '2-digit' });
@@ -262,7 +327,6 @@ const triggerAutoScheduling = useCallback(async (tasksToSchedule: Plan[], target
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          message: "Службовий запит", 
           isAutoOptimize: true, 
           userId: userData?.id, 
           workSchedule, 
@@ -326,11 +390,11 @@ const triggerAutoScheduling = useCallback(async (tasksToSchedule: Plan[], target
     setInputValue("");
     setIsAiLoading(true);
 
-    const targetDateStr = normalizeDate(`${baseDate.getDate()}-${baseDate.getMonth()}-${baseDate.getFullYear()}`);
+    const targetDateStr = normalizeDate(`${baseDate.getDate()}-${baseDate.getMonth() + 1}-${baseDate.getFullYear()}`);
     const plansForTargetDay = allPlans.filter(p => !p.completed && normalizeDate(p.date) === targetDateStr);
     
     const now = new Date();
-    const isToday = targetDateStr === normalizeDate(`${now.getDate()}-${now.getMonth()}-${now.getFullYear()}`);
+    const isToday = targetDateStr === normalizeDate(`${now.getDate()}-${now.getMonth() + 1}-${now.getFullYear()}`);
     const timeToPass = isToday ? now.toLocaleTimeString("uk-UA", { hour: '2-digit', minute: '2-digit' }) : "09:00";
 
     try {
@@ -382,28 +446,39 @@ const triggerAutoScheduling = useCallback(async (tasksToSchedule: Plan[], target
       setMessages(prev => [...prev, { id: `err-${Date.now()}`, role: "ai", text: "Помилка зв'язку з асистентом." }]);
     } finally { setIsAiLoading(false); }
   };
+const savePlansToStorage = async (updatedPlans: Plan[]) => {
+    const isGuest = (await localforage.getItem("isGuest")) === "true";
+    const nameKey = isGuest ? "Гість" : (userData?.name || "user");
+    const plansKey = isGuest ? "unimind-plans-guest" : `unimind-plans-${nameKey}`;
 
-  const handleSavePlansToServer = async () => {
-    if (!userData?.id) return;
+    await localforage.setItem(plansKey, updatedPlans);
+
+    if (!isGuest && userData?.id) {
+      try {
+        await fetch(`${API_URL}/ai/save-plans`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: userData.id, plans: updatedPlans })
+        });
+      } catch (err) {
+        console.error("Помилка синхронізації з сервером:", err);
+      }
+    }
+    window.dispatchEvent(new Event("plansUpdated"));
+  };
+
+ const handleSavePlansToServer = async () => {
     setIsSaving(true);
     try {
-      const nameKey = userData.name || "user";
-      await localforage.setItem(`unimind-plans-${nameKey}`, allPlans);
-
-      const res = await fetch(`${API_URL}/ai/save-plans`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: userData.id, plans: allPlans })
-      });
-
-      if (res.ok) {
-        setHasUnsavedChanges(false);
-        setMessages(prev => [...prev, { id: `sys-save-${Date.now()}`, role: "ai", text: "Графік успішно затверджено та перенесено в Календар!" }]);
-      }
+      // Використовуємо нашу нову супер-функцію
+      await savePlansToStorage(allPlans);
+      setHasUnsavedChanges(false);
+      setMessages(prev => [...prev, { id: `sys-save-${Date.now()}`, role: "ai", text: "Графік успішно затверджено та перенесено в Календар!" }]);
     } catch {
-      alert("Не вдалося підключитися до сервера для синхронізації.");
+      alert("Не вдалося зберегти плани.");
     } finally { setIsSaving(false); }
   };
+
 
   const handleDiscardChanges = async () => {
     const isGuest = (await localforage.getItem("isGuest")) === "true";
@@ -462,7 +537,7 @@ const triggerAutoScheduling = useCallback(async (tasksToSchedule: Plan[], target
       default: return { icon: <User weight="fill" />, colorClass: "cat-personal" };
     }
   };
- return (
+return (
     <div className="planner-container">
       <style>{`
         .cat-study { background: rgba(142, 194, 255, 0.85) !important; box-shadow: inset 4px 0 0 0 #5a9cf8; }
@@ -473,6 +548,11 @@ const triggerAutoScheduling = useCallback(async (tasksToSchedule: Plan[], target
         
         .planner-task-card { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; border-radius: 12px; }
         .current-hour-highlight { background: #9675e3; color: white; padding: 4px 10px; border-radius: 12px; font-weight: bold; box-shadow: 0 4px 12px rgba(150, 117, 227, 0.3); }
+        
+        /* Базові правила для гнучкого розподілу простору */
+        .planner-container { display: flex; width: 100%; gap: 20px; box-sizing: border-box; }
+        .planner-main { flex: 1; min-width: 0; } /* Розтягується на всю ширину, якщо чат приховано */
+      
       `}</style>
 
       <motion.div className="planner-main" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
@@ -526,8 +606,7 @@ const triggerAutoScheduling = useCallback(async (tasksToSchedule: Plan[], target
                   ))}
                   <div style={{ position: 'absolute', top: 0, left: '55px', right: 0, bottom: 0, display: 'flex', pointerEvents: 'none' }}>
                     {currentWeekDays.map((dayObj: Date, i: number) => {
-                      const dateStr = normalizeDate(`${dayObj.getDate()}-${dayObj.getMonth()}-${dayObj.getFullYear()}`);
-                      return (
+const dateStr = normalizeDate(`${dayObj.getDate()}-${dayObj.getMonth() + 1}-${dayObj.getFullYear()}`);                      return (
                         <div key={`wk-col-${i}`} style={{ flex: 1, position: 'relative' }}>
                           {plannerTasks.filter(t => t.dateKey === dateStr).map((task, idx) => (
                             <div 
@@ -555,8 +634,8 @@ const triggerAutoScheduling = useCallback(async (tasksToSchedule: Plan[], target
                   </div>
                 ))}
                 <div style={{ position: 'absolute', top: '10px', left: '55px', right: 0, bottom: 0, pointerEvents: 'none' }}>
-                  {plannerTasks.filter(t => t.dateKey === normalizeDate(`${baseDate.getDate()}-${baseDate.getMonth()}-${baseDate.getFullYear()}`)).map((task, idx) => {
-                    const currentDayStr = normalizeDate(`${baseDate.getDate()}-${baseDate.getMonth()}-${baseDate.getFullYear()}`);
+{plannerTasks.filter(t => t.dateKey === normalizeDate(`${baseDate.getDate()}-${baseDate.getMonth() + 1}-${baseDate.getFullYear()}`)).map((task, idx) => {
+const currentDayStr = normalizeDate(`${baseDate.getDate()}-${baseDate.getMonth() + 1}-${baseDate.getFullYear()}`);
                     return (
                       <div 
                         key={`task-day-${task.id || 'temp'}-${idx}-${currentDayStr}`} 
@@ -601,70 +680,73 @@ const triggerAutoScheduling = useCallback(async (tasksToSchedule: Plan[], target
         </div>
       </motion.div>
 
-      <motion.div className="planner-sidebar" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
-        <div className="sidebar-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <h3>ШІ Асистент</h3>
-            <Sparkle size={24} weight="fill" color="#9675e3" className="spin-slow" />
-          </div>
-          <button 
-            onClick={handleClearHistory} 
-            title="Очистити історію"
-            style={{ background: "none", border: "none", color: "#e05252", cursor: "pointer", display: "flex", alignItems: "center", gap: "4px", fontSize: "13px", fontWeight: 600 }}
-          >
-            <Trash size={16} /> Очистити
-          </button>
-        </div>
-        <div className="sidebar-chat scrollable-area">
-          <AnimatePresence>
-            {messages.map((msg, idx) => (
-              <motion.div 
-key={`msg-${msg?.id ? msg.id : `temp-${idx}`}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={msg.role === "ai" ? "ai-message-card" : "user-message-card"}>
-                {msg.role === "ai" && <div className="ai-message-badge"><Sparkle size={14} weight="fill" /><span>UniMind AI</span></div>}
-                <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{msg.text}</p>
-              </motion.div>
-            ))}
-            {isAiLoading && (<div className="ai-typing"><CircleNotch size={24} className="spin-fast" color="#9675e3" /><span>Аналізую...</span></div>)}
-            <div ref={chatEndRef} />
-          </AnimatePresence>
-        </div>
-        
-        <div className="sidebar-input-area" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {overdueTasks.length > 0 && (
-            <div style={{ background: '#fff0db', padding: '12px', borderRadius: '12px', fontSize: '12px', color: '#e68a00', display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: '1px solid rgba(230, 138, 0, 0.2)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <WarningCircle size={18} weight="bold" />
-                <span>Протерміновано справ: <strong style={{ fontSize: '14px' }}>{overdueTasks.length}</strong></span>
-              </div>
-              <button 
-                onClick={handleSilentOverdueScheduling}
-                disabled={isAiLoading || isAutoScheduling}
-                style={{ background: '#e68a00', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', transition: '0.2s' }}
-              >
-                {isAutoScheduling ? "Переношу..." : "Перенести розумно"}
-              </button>
+      {/* Гостьовий режим: чат рендериться ТІЛЬКИ якщо користувач НЕ гість */}
+      {!isGuestMode && (
+        <motion.div className="planner-sidebar" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+          <div className="sidebar-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <h3>ШІ Асистент</h3>
+              <Sparkle size={24} weight="fill" color="#9675e3" className="spin-slow" />
             </div>
-          )}
-          <div className="input-box">
-            <input 
-              type="text" 
-              placeholder="Запитай про обід або плани..." 
-              value={inputValue} 
-              onChange={(e) => setInputValue(e.target.value)} 
-              onKeyDown={e => e.key === "Enter" && handleSendMessage()} 
-              disabled={isAiLoading || isAutoScheduling} 
-            />
             <button 
-              id="ai-send-trigger" 
-              className="send-btn" 
-              onClick={() => handleSendMessage()} 
-              disabled={isAiLoading || isAutoScheduling}
+              onClick={handleClearHistory} 
+              title="Очистити історію"
+              style={{ background: "none", border: "none", color: "#e05252", cursor: "pointer", display: "flex", alignItems: "center", gap: "4px", fontSize: "13px", fontWeight: 600 }}
             >
-              <PaperPlaneRight size={22} weight="fill" />
+              <Trash size={16} /> Очистити
             </button>
           </div>
-        </div>
-      </motion.div>
+          <div className="sidebar-chat scrollable-area">
+            <AnimatePresence>
+              {messages.map((msg, idx) => (
+                <motion.div 
+                  key={`msg-${msg?.id ? msg.id : `temp-${idx}`}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={msg.role === "ai" ? "ai-message-card" : "user-message-card"}>
+                  {msg.role === "ai" && <div className="ai-message-badge"><Sparkle size={14} weight="fill" /><span>UniMind AI</span></div>}
+                  <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{msg.text}</p>
+                </motion.div>
+              ))}
+              {isAiLoading && (<div className="ai-typing"><CircleNotch size={24} className="spin-fast" color="#9675e3" /><span>Аналізую...</span></div>)}
+              <div ref={chatEndRef} />
+            </AnimatePresence>
+          </div>
+          
+          <div className="sidebar-input-area" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {overdueTasks.length > 0 && (
+              <div style={{ background: '#fff0db', padding: '12px', borderRadius: '12px', fontSize: '12px', color: '#e68a00', display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: '1px solid rgba(230, 138, 0, 0.2)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <WarningCircle size={18} weight="bold" />
+                  <span>Протерміновано справ: <strong style={{ fontSize: '14px' }}>{overdueTasks.length}</strong></span>
+                </div>
+                <button 
+                  onClick={handleSilentOverdueScheduling}
+                  disabled={isAiLoading || isAutoScheduling}
+                  style={{ background: '#e68a00', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', transition: '0.2s' }}
+                >
+                  {isAutoScheduling ? "Переношу..." : "Перенести розумно"}
+                </button>
+              </div>
+            )}
+            <div className="input-box">
+              <input 
+                type="text" 
+                placeholder="Запитай про обід або плани..." 
+                value={inputValue} 
+                onChange={(e) => setInputValue(e.target.value)} 
+                onKeyDown={e => e.key === "Enter" && handleSendMessage()} 
+                disabled={isAiLoading || isAutoScheduling} 
+              />
+              <button 
+                id="ai-send-trigger" 
+                className="send-btn" 
+                onClick={() => handleSendMessage()} 
+                disabled={isAiLoading || isAutoScheduling}
+              >
+                <PaperPlaneRight size={22} weight="fill" />
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      )}
     </div>
   );
 };
